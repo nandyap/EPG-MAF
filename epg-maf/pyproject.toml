@@ -108,6 +108,7 @@ markers = [
     "unit: fast unit tests, no external services",
     "integration: requires local Postgres + Cosmos emulator",
     "parity: byte-parity vs the LangGraph prototype",
+    "mode_parity: sequential-vs-parallel dispatch parity (W06)",
     "slow: takes over 5 seconds",
 ]
 

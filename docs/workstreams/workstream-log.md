@@ -45,7 +45,7 @@ Every workstream section carries the same subsections in the same order:
 | W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ✅ Complete | 2–3 | BE2 | 11 / 7 | ~2,520 | W01, W02 |
 | W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ✅ Complete | 4 | BE1 | 15 / 7 | ~1,880 | W01, W03 |
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ✅ Complete | 4–5 | BE2 | 13 / 4 | ~2,860 | W03, W04 |
-| W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ⏳ Not started | 5 | BE1 + QA | — | — | W04, W05 |
+| W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ✅ Complete | 5 | BE1 + QA | 2 / 5 + 2 docs | ~770 | W04, W05 |
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ⏳ Not started | 6 | BE2 + SEC | — | — | W01, W03 |
 | W08 | [Observability](#workstream-w08--observability-) | ⏳ Not started | 6 | PE + BE1 | — | — | W01, W04, W05 |
 | W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ⏳ Not started | 6 | BE1 | — | — | W04, W05 |
@@ -77,7 +77,8 @@ flowchart LR
     class W03 done
     class W04 done
     class W05 done
-    class W06,W07,W08,W09,W10,W11 pending
+    class W06 done
+    class W07,W08,W09,W10,W11 pending
 ```
 
 ---
@@ -1527,29 +1528,235 @@ Engineering Plan ("F07.x — Shadow test: same input, prototype output
 
 ---
 
-## Workstream W06 — Parallel Execution & Mode-Parity ⏳
+## Workstream W06 — Parallel Execution & Mode-Parity ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 5
-**Owner:** BE1 + QA
+**Owner:** BE1 (implementation), QA (parity harness), SA (contract review)
+**PR gate reviewers:** SA · BE1 · QA
+**Files:** 2 source touched + 5 test + 2 docs in `epg-maf/` / `docs/`
+**LOC:** ~770 total (source ≈60 delta · tests ≈625 · docs ≈140)
 **Depends on:** W04, W05
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Turn on the parallel-dispatch capability with a runtime flag; prove sequential and parallel modes produce identical business outputs.
+Prove that `sequential` and `parallel` dispatch produce **byte-identical
+clinician-facing outputs** for the same inputs, and publish the enablement
+contract that must pass before flipping to `parallel` in production. Most
+of the plumbing already exists (W04 built the fan-out topology, W05
+wired the specialists) — W06 is the harness that continuously proves
+the plumbing works.
 
 **In scope:**
 
-- `ORCH_DISPATCH_MODE` and `ORCH_MAX_FANOUT_WIDTH` flags wired through `Settings`.
-- Mode-parity harness (blocking): every golden question passes under both modes, structural equality on `<Domain>StateOutput`.
-- Per-mode telemetry — `orch.mode` label on relevant metrics.
-- Enablement gate documentation (Design §16.8) — checklist that must pass before enabling parallel in prod.
+- Business-behaviour mode-parity harness (F08.2): runs the same
+  workflow twice, deep-diffs the final `ChatWorkflowState`s, blocks CI
+  on any diff.
+- Deterministic :class:`SpecialistRegistry` fixture (
+  [`tests/support/deterministic_specialists.py`](../../epg-maf/tests/support/deterministic_specialists.py))
+  so the harness proves *the workflow* is parity-safe without depending
+  on live LLM determinism.
+- Reusable [`parity_diff.deep_diff`](../../epg-maf/tests/support/parity_diff.py)
+  helper with a small ignore-key set for volatile-but-legitimate
+  differences (`updated_at`, `router_iterations`, etc.).
+- New pytest marker `mode_parity` for the harness suite.
+- F08.1 completion: `dispatch_mode_summary()` helper on `Settings`,
+  `orch.mode` + `orch.width` fields on every `orch_router.dispatched`
+  log event (Log-only in W06; W08 lifts to OTEL span attrs).
+- Config doc ([`docs/config/orchestration.md`](../config/orchestration.md))
+  describing the three orchestration knobs and their semantics.
+- Enablement gate runbook
+  ([`docs/runbooks/enable-parallel-dispatch.md`](../runbooks/enable-parallel-dispatch.md))
+  — verbatim port of Design §16.8 checklist plus operational rollback
+  procedure (F08.4).
 
-**Out of scope:** load testing of the parallel path (that's W10).
+**Out of scope:**
 
-### Sections 2–11
+- F08.3 per-mode OTEL span attributes (→ W08 owns OTEL; W06 emits the
+  same key names as log fields so W08 is a straight port).
+- Load testing of the parallel path under production RPM (→ W10).
+- Live-LLM shadow test against the prototype (→ W07 wiring, then a
+  separate future workstream).
 
-Filled in when the workstream starts.
+### 2. Mapping to the engineering plan
+
+| Plan feature | Deliverable | Where |
+|---|---|---|
+| **F08.1** — flags loaded from `Settings` | Already in W04; W06 adds `dispatch_mode_summary()` helper | [`config/settings.py`](../../epg-maf/src/egp_maf/config/settings.py) |
+| **F08.1** — `sequential` enforces `\|dispatch_set\|=1` | Already in W04's `OrchRouterExecutor`; validated end-to-end by [`TestModeParityWidthSanitisation`](../../epg-maf/tests/mode_parity/test_mode_parity.py) | — |
+| **F08.1** — `parallel` enforces `\|dispatch_set\| ≤ ORCH_MAX_FANOUT_WIDTH` | Already in W04; validated end-to-end by [`TestModeParityWidthCap`](../../epg-maf/tests/mode_parity/test_mode_parity.py) | — |
+| **F08.1** — flag values surfaced as span attribute `orch.mode` | Log field today (`workflow_runtime.built`, `orch_router.dispatched`); W08 lifts to span attr | [`workflow/runtime.py`](../../epg-maf/src/egp_maf/workflow/runtime.py) + [`workflow/orchestration/orch_router.py`](../../epg-maf/src/egp_maf/workflow/orchestration/orch_router.py) |
+| **F08.1** — invalid mode raises at startup | Pydantic `DispatchMode` enum + `ge/le` bounds on width | [`tests/unit/test_settings.py::test_invalid_dispatch_mode_raises_at_startup`](../../epg-maf/tests/unit/test_settings.py) |
+| **F08.2** — parity harness, blocking on diff | 4 test classes covering full-fanout, partial-fanout, sanitisation, width cap | [`tests/mode_parity/test_mode_parity.py`](../../epg-maf/tests/mode_parity/test_mode_parity.py) |
+| **F08.2** — harness's diff function itself unit-tested | 13 unit tests covering scalars, dicts, lists (order-in/sensitive), ignore keys, type mismatches | [`tests/unit/test_parity_diff.py`](../../epg-maf/tests/unit/test_parity_diff.py) |
+| **F08.3** — per-mode telemetry | Log-level only in W06 (`orch.mode`, `orch.width` on every dispatch event) — W08 lifts to OTEL | — |
+| **F08.4** — enablement gate documentation | Full runbook: RPM/pool/provenance/chaos checklist + rollback procedure + flip diff template | [`docs/runbooks/enable-parallel-dispatch.md`](../runbooks/enable-parallel-dispatch.md) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**No new MAF touch points in W06.** The workflow topology, executors,
+reducers, fan-out/fan-in edges and `SpecialistDispatchSet` sanitisation
+are all W04 primitives; W06 only proves that flipping the two config
+knobs doesn't change the clinician-facing output.
+
+### 4. Files created
+
+<details>
+<summary>Tests + fixtures (5 files)</summary>
+
+```
+epg-maf/tests/support/parity_diff.py                (~140 LOC — deep-diff helper)
+epg-maf/tests/support/deterministic_specialists.py  (~180 LOC — canned SpecialistRegistry)
+epg-maf/tests/mode_parity/__init__.py               (marker)
+epg-maf/tests/mode_parity/conftest.py               (auto-applies mode_parity marker)
+epg-maf/tests/mode_parity/test_mode_parity.py       (~215 LOC — 4 harness classes / 4 tests)
+epg-maf/tests/unit/test_parity_diff.py              (~80 LOC — 13 unit tests for the diff helper)
+```
+</details>
+
+<details>
+<summary>Docs (2 files)</summary>
+
+```
+docs/config/orchestration.md                        (~70 LOC — three orchestration knobs + semantics + log events)
+docs/runbooks/enable-parallel-dispatch.md           (~80 LOC — Design §16.8 enablement gate + flip diff + rollback)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/config/settings.py` | New `dispatch_mode_summary()` helper returning `orch.mode`, `orch.max_fanout_width`, `orch.iteration_budget` as one dict for logs and the enablement checklist. |
+| `epg-maf/src/egp_maf/workflow/orchestration/orch_router.py` | `orch_router.dispatched` log event now carries `orch.mode` + `orch.width` fields (W08 will lift these to span attrs). |
+| `epg-maf/src/egp_maf/workflow/runtime.py` | `workflow_runtime.built` log event now spreads `settings.dispatch_mode_summary()` for log-parser consumption. |
+| `epg-maf/pyproject.toml` | Registered `mode_parity` pytest marker. |
+| `epg-maf/tests/unit/test_settings.py` | +2 tests: invalid dispatch mode raises; `dispatch_mode_summary()` shape. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**The harness is the whole product.** F08.2's acceptance criterion is
+"every golden question passes under both modes; structural equality on
+`<Domain>StateOutput`". W06 delivers a harness that runs the entire
+workflow twice — real `SpecialistExecutor`s, real `SpecialistBase`
+pipelines, real provenance construction, real family-history privacy
+strip — with only the LLM adapter stubbed. If any topology decision,
+reducer semantics, or joiner behaviour differs between modes, the diff
+list won't be empty and CI blocks.
+
+**Parity is enforced by construction, not by test.** The
+:class:`OrchRouterExecutor` sanitisation logic (W04) is what actually
+makes parallel decisions safe under sequential mode and bounded under
+parallel mode. The W06 harness exercises those two branches through the
+full workflow at :class:`TestModeParityWidthSanitisation` and
+:class:`TestModeParityWidthCap`, but the invariants themselves live in
+the production code.
+
+**Ignore-key list is small and named.** The parity-diff helper drops
+five well-known volatile fields: `updated_at`, `produced_at`,
+`timestamp`, `router_iterations`, `retrieved_at`. Every other field —
+including provenance rows, derived fields, message content — must
+match byte-for-byte across modes. Adding a field to the ignore list is
+an intentional, reviewable action.
+
+**Deterministic fixture uses real specialists.** The fixture in
+[`tests/support/deterministic_specialists.py`](../../epg-maf/tests/support/deterministic_specialists.py)
+reuses :class:`PRSSpecialist`, :class:`GenomicVariantsSpecialist`, etc.
+— only the LLM bridge is stubbed. This means the family-history privacy
+strip, the PGX composite-key provenance match, the genomic-variants
+`pathogenic_count` derivation, and every other domain-specific quirk
+are all exercised by the harness. A parity break in any of them shows
+as a diff.
+
+**Fresh registry per run.** The stubbed :class:`SpecialistLlm` returns
+the same :class:`ResultList` instance from each `run_extraction` call,
+and the pipeline mutates it in place (appends provenance). The harness
+calls `build_deterministic_registry()` separately for each runtime so
+no state leaks between the sequential and parallel runs. This was a
+real bug the harness caught on the first draft — exactly the kind of
+cross-mode contamination the harness is designed to find.
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| Parity-diff helper | `tests/unit/test_parity_diff.py` | 13 | unit |
+| Mode-parity harness | `tests/mode_parity/test_mode_parity.py` | 4 | mode_parity |
+| Settings (invalid mode + summary shape) | `tests/unit/test_settings.py` | +2 | unit |
+| **W06 subtotal** | | **19** | |
+| **Programme total (W01–W06)** | | **258 passing** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+.\.venv\Scripts\python.exe -m pytest -m "not integration and not parity" -q
+# Just the mode-parity harness:
+.\.venv\Scripts\python.exe -m pytest -m mode_parity -q
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+**Not applicable in W06.** Sequential-vs-parallel parity is about the
+target workflow's *internal* consistency across two dispatch modes, not
+about the target vs the prototype. The prototype only runs one mode
+(sequential); a shadow test comparing target `sequential` output to
+prototype output is a separate future workstream.
+
+### 9. Validation Checklist (paste into PR)
+
+**Config flags (F08.1)**
+
+- [ ] `pytest tests/unit/test_settings.py -v` — all green.
+- [ ] `ORCH_DISPATCH_MODE=wibble` raises `ValidationError` at startup.
+- [ ] `ORCH_MAX_FANOUT_WIDTH=6` raises `ValidationError` at startup.
+- [ ] `settings.dispatch_mode_summary()` returns `{'orch.mode', 'orch.max_fanout_width', 'orch.iteration_budget'}` keys.
+
+**Harness helpers (F08.2)**
+
+- [ ] `pytest tests/unit/test_parity_diff.py -v` — all green.
+- [ ] `deep_diff({}, {})` returns `[]`.
+- [ ] `deep_diff(a, b, ignore_keys={'x'})` skips `x` at any depth.
+- [ ] Order-insensitive comparison works for `agents_completed` at any depth.
+- [ ] Type mismatches (`1` vs `"1"`) reported as diffs.
+
+**Mode-parity harness (F08.2)**
+
+- [ ] `pytest -m mode_parity -v` — all green.
+- [ ] Full-fanout scenario: 5 specialists dispatched, structural equality holds.
+- [ ] Partial-fanout scenario: 2 specialists dispatched, structural equality holds.
+- [ ] Sequential mode silently downgrades a `[prs, pgx]` LLM decision to `[prs]` (F08.1 acc-2).
+- [ ] Parallel mode with `width=2` caps a `[prs, pgx, family_history, phenotype]` LLM decision at 2 (F08.1 acc-3).
+
+**Telemetry (F08.3 log-only preview)**
+
+- [ ] `orch_router.dispatched` events carry `orch.mode` + `orch.width`.
+- [ ] `workflow_runtime.built` event carries `orch.mode`, `orch.max_fanout_width`, `orch.iteration_budget`.
+- [ ] W08 span-attribute keys named identically — no schema change when OTEL wires up.
+
+**Docs (F08.4)**
+
+- [ ] `docs/config/orchestration.md` exists and covers all three knobs, semantics, and log events.
+- [ ] `docs/runbooks/enable-parallel-dispatch.md` matches Design §16.8 items (Compass RPM, Postgres pool, provenance concurrent-write, chaos kill).
+- [ ] Runbook includes rollback procedure and PR-flip diff template.
+
+### 10. Known follow-ups (out of scope for W06)
+
+- **F08.3 real OTEL span attributes** (→ W08).
+- **Load test of the parallel path** at production RPM (→ W10).
+- **Live-LLM shadow test vs prototype** (→ post-W07).
+- **Chaos harness for the kill-one-specialist scenario** (→ W09 resilience).
+
+### 11. Sign-off
+
+- [ ] SA — topology + sanitisation invariants review
+- [ ] BE1 — implementation reviewer
+- [ ] QA — parity harness sign-off (blocking on CI)
+- [ ] BIX — aware of enablement runbook
 
 ---
 
@@ -1691,3 +1898,4 @@ Filled in when the workstream starts.
 | 2026-07-09 | W03 pre-push: drive-by fixes to keep pytest fully green — repaired PEP 3110 scoping bug in `tests/unit/test_errors.py::test_error_chain` and silenced two Pydantic 2.11 `model_fields`-on-instance deprecation warnings in the two W03 family-history tests. Behaviour unchanged. | Delivery Lead |
 | 2026-07-09 | W04 (MAF Workflow Skeleton) implementation complete. Chat + orchestration sub-workflow on `agent-framework 1.10.0`; state models with set-append reducer; router decision types; fan-out plumbing dormant at width 1; iteration budget with typed `RoutingBudgetExceeded`. 49 new unit tests; 212 total passing. | Delivery Lead |
 | 2026-07-09 | W05 (Specialist Agents) implementation complete. `SpecialistBase` template + 5 concrete specialists with domain-specific derived fields + family-history privacy strip; 14 `@tool` shims; MAF-backed `SpecialistLlm` bridge; `SpecialistExecutor` replaces W04 placeholder; `SpecialistRegistry` wired via DI. Latent W01 `OpenAIChatClient(model_id=)` typo fixed on the way through. 24 new unit tests; 236 total passing. | Delivery Lead |
+| 2026-07-10 | W06 (Parallel Execution & Mode-Parity) implementation complete. Business-behaviour parity harness + deterministic `SpecialistRegistry` fixture + `parity_diff.deep_diff` helper; `mode_parity` pytest marker; `dispatch_mode_summary()` helper on `Settings`; `orch.mode` + `orch.width` on dispatch log events; `docs/config/orchestration.md` + `docs/runbooks/enable-parallel-dispatch.md` published. Harness caught a real state-sharing bug in the deterministic fixture on the first draft — fixed by building a fresh registry per run. 19 new tests; 258 total passing. | Delivery Lead |

@@ -65,6 +65,10 @@ class WorkflowRuntime:
                 if specialist_registry is not None
                 else []
             ),
+            # W06: full dispatch-mode summary as one structured field so
+            # log parsers can pull the current config without re-parsing
+            # env vars. Same keys W08 will use for OTEL span attributes.
+            **settings.dispatch_mode_summary(),
         )
 
     @property

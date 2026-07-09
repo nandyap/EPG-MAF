@@ -145,6 +145,25 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.env == "prod"
 
+    def dispatch_mode_summary(self) -> dict[str, str | int]:
+        """Structured summary of the orchestration dispatch configuration.
+
+        Used by:
+
+        - The workflow-runtime start-up log (``workflow_runtime.built``).
+        - The Phase-3 enablement gate checklist (see
+          ``docs/runbooks/enable-parallel-dispatch.md``) so the auditor
+          can confirm the effective mode + width without grepping env
+          vars.
+        - W08 will attach these as ``orch.*`` attributes to the workflow
+          root span.
+        """
+        return {
+            "orch.mode": self.orch_dispatch_mode.value,
+            "orch.max_fanout_width": self.orch_max_fanout_width,
+            "orch.iteration_budget": self.orch_iteration_budget,
+        }
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

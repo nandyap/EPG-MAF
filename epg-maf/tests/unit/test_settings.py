@@ -67,6 +67,24 @@ class TestSettingsValidation:
         with pytest.raises(ValidationError):
             Settings()  # type: ignore[call-arg]
 
+    def test_invalid_dispatch_mode_raises_at_startup(
+        self, monkeypatch: pytest.MonkeyPatch, minimal_env: None
+    ) -> None:
+        """F08.1 acceptance: invalid mode must fail construction."""
+        monkeypatch.setenv("ORCH_DISPATCH_MODE", "wibble")
+        with pytest.raises(ValidationError):
+            Settings()  # type: ignore[call-arg]
+
+    def test_dispatch_mode_summary_shape(self, settings: Settings) -> None:
+        """W06 helper — surfaces the effective mode/width/budget as one
+        structured dict for logs and the enablement gate checklist."""
+        summary = settings.dispatch_mode_summary()
+        assert summary == {
+            "orch.mode": "sequential",
+            "orch.max_fanout_width": 1,
+            "orch.iteration_budget": 12,
+        }
+
     def test_credentials_valid_with_password(self, settings: Settings) -> None:
         assert settings.credentials_are_valid() is True
 

@@ -137,6 +137,11 @@ class OrchRouterExecutor(Executor):
             iterations=next_state.router_iterations,
             dispatch=list(decision.specialists),
             reason=decision.reason,
+            # W06: orch.mode + width are surfaced on every dispatch so
+            # log analysis can partition latency/cost by mode without
+            # joining against config. W08 lifts these to OTEL span attrs.
+            **{"orch.mode": self._settings.orch_dispatch_mode.value},
+            **{"orch.width": len(decision.specialists)},
         )
         await ctx.send_message(
             SpecialistDispatch(state=next_state, decision=decision),
