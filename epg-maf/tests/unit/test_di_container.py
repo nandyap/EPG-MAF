@@ -69,10 +69,14 @@ def _build_test_container(settings: Settings) -> tuple[
     # W04: a WorkflowRuntime is now part of the Container. We construct one
     # with the same stub router LLMs the production build_container uses in
     # the absence of a real Compass-backed router.
+    from egp_maf.agents.registry import SpecialistRegistry
     from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
     from egp_maf.workflow.router_llm import StubOrchRouterLlm, StubRouterLlm
     from egp_maf.workflow.runtime import WorkflowRuntime
 
+    # Empty SpecialistRegistry keeps the workflow topology in stub mode;
+    # this test isn't exercising a real specialist run.
+    empty_registry = SpecialistRegistry()
     workflow_runtime = WorkflowRuntime(
         settings=settings,
         chat_router_llm=StubRouterLlm(
@@ -81,6 +85,7 @@ def _build_test_container(settings: Settings) -> tuple[
         orch_router_llm=StubOrchRouterLlm(
             [SpecialistDispatchSet(specialists=[], reason="test stub")]
         ),
+        specialist_registry=empty_registry,
     )
 
     container = Container(
@@ -92,6 +97,7 @@ def _build_test_container(settings: Settings) -> tuple[
         thread_state_provider=thread_state,
         provenance_service=ProvenanceService(),
         authz_policy=OpenAuthzPolicy(),
+        specialist_registry=empty_registry,
         workflow_runtime=workflow_runtime,
     )
     return container, db, cosmos, prompt
@@ -169,3 +175,11 @@ class TestBuildContainerWiring:
         assert isinstance(container.workflow_runtime, WorkflowRuntime)
         assert container.workflow_runtime.chat_workflow is not None
         assert container.workflow_runtime.orchestration_workflow is not None
+
+        # W05 addition — the specialist registry is wired with all 5.
+        from egp_maf.agents.registry import SpecialistRegistry
+
+        assert isinstance(container.specialist_registry, SpecialistRegistry)
+        assert container.specialist_registry.names() == sorted(
+            ["prs", "genomic_variants", "family_history", "pgx", "phenotype"]
+        )

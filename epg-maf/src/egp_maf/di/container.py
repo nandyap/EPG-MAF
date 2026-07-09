@@ -14,6 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from egp_maf.agents.registry import (
+    SpecialistRegistry,
+    build_specialist_registry,
+)
 from egp_maf.config.settings import Settings, get_settings
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
@@ -22,6 +26,13 @@ from egp_maf.logging.setup import configure_logging, get_logger
 from egp_maf.services.authz import AllowlistAuthzPolicy, AuthzPolicy
 from egp_maf.services.prompt_service import PromptService
 from egp_maf.services.provenance import ProvenanceService
+from egp_maf.services.repositories import (
+    FamilyHistoryRepository,
+    GenomicVariantsRepository,
+    PGXRepository,
+    PhenotypeRepository,
+    PRSRepository,
+)
 from egp_maf.services.thread_state import ThreadStateProvider
 from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
 from egp_maf.workflow.router_llm import (
@@ -62,6 +73,7 @@ class Container:
         thread_state_provider: ThreadStateProvider,
         provenance_service: ProvenanceService,
         authz_policy: AuthzPolicy,
+        specialist_registry: SpecialistRegistry,
         workflow_runtime: WorkflowRuntime,
     ) -> None:
         self.settings = settings
@@ -72,6 +84,7 @@ class Container:
         self.thread_state_provider = thread_state_provider
         self.provenance_service = provenance_service
         self.authz_policy = authz_policy
+        self.specialist_registry = specialist_registry
         self.workflow_runtime = workflow_runtime
 
         self._started: bool = False
@@ -173,7 +186,7 @@ def build_container(
     )
     authz_policy: AuthzPolicy = AllowlistAuthzPolicy(allowlist_path)
 
-    # Router LLMs — defaults are safe stubs; W05 replaces with real ones.
+    # Router LLMs — defaults are safe stubs; production supplies real ones.
     resolved_chat_router: RouterLlm = chat_router_llm or StubRouterLlm(
         ChatRouterDecision(
             needs_clinical_data=False,
@@ -184,10 +197,53 @@ def build_container(
     resolved_orch_router: OrchRouterLlm = orch_router_llm or StubOrchRouterLlm(
         [SpecialistDispatchSet(specialists=[], reason="default stub — immediate end")]
     )
+
+    # Specialists (W05). Each is bound to the shared Repository +
+    # ProvenanceService and to a MAF-backed :class:`SpecialistLlm`.
+    # ``prompt_service.warm()`` must have been called before the
+    # container is used; ``build_specialist_registry`` accesses prompts
+    # lazily.
+    prs_repo = PRSRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
+    genomic_variants_repo = GenomicVariantsRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
+    family_history_repo = FamilyHistoryRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
+    pgx_repo = PGXRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
+    phenotype_repo = PhenotypeRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
+    specialist_registry = build_specialist_registry(
+        prs_repo=prs_repo,
+        genomic_variants_repo=genomic_variants_repo,
+        family_history_repo=family_history_repo,
+        pgx_repo=pgx_repo,
+        phenotype_repo=phenotype_repo,
+        llm_client_factory=llm_client_factory,
+        prompt_service=prompt_service,
+        provenance_service=provenance_service,
+    )
+
     workflow_runtime = WorkflowRuntime(
         settings=resolved_settings,
         chat_router_llm=resolved_chat_router,
         orch_router_llm=resolved_orch_router,
+        specialist_registry=specialist_registry,
     )
 
     return Container(
@@ -199,5 +255,6 @@ def build_container(
         thread_state_provider=thread_state_provider,
         provenance_service=provenance_service,
         authz_policy=authz_policy,
+        specialist_registry=specialist_registry,
         workflow_runtime=workflow_runtime,
     )

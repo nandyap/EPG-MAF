@@ -44,7 +44,7 @@ Every workstream section carries the same subsections in the same order:
 | W02 | [Clinical Data Layer](#workstream-w02--clinical-data-layer-) | ✅ Complete | 2 | DE + BE2 | 14 / 7 | ~1,650 | W01 |
 | W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ✅ Complete | 2–3 | BE2 | 11 / 7 | ~2,520 | W01, W02 |
 | W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ✅ Complete | 4 | BE1 | 15 / 7 | ~1,880 | W01, W03 |
-| W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ⏳ Not started | 4–5 | BE2 | — | — | W03, W04 |
+| W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ✅ Complete | 4–5 | BE2 | 13 / 4 | ~2,860 | W03, W04 |
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ⏳ Not started | 5 | BE1 + QA | — | — | W04, W05 |
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ⏳ Not started | 6 | BE2 + SEC | — | — | W01, W03 |
 | W08 | [Observability](#workstream-w08--observability-) | ⏳ Not started | 6 | PE + BE1 | — | — | W01, W04, W05 |
@@ -76,7 +76,8 @@ flowchart LR
     class W02 done
     class W03 done
     class W04 done
-    class W05,W06,W07,W08,W09,W10,W11 pending
+    class W05 done
+    class W06,W07,W08,W09,W10,W11 pending
 ```
 
 ---
@@ -1252,29 +1253,277 @@ Design §28 "Shadow tests").
 
 ---
 
-## Workstream W05 — Specialist Agents ⏳
+## Workstream W05 — Specialist Agents ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 4–5
-**Owner:** BE2
+**Owner:** BE2 (implementation), BIX (prompt review), SA (contract review)
+**PR gate reviewers:** SA · BE2 · BIX
+**Files:** 13 source + 4 test in `epg-maf/`; DI container + workflow build + tests updated; W01 `compass_client.py` argument-name bug fixed
+**LOC:** ~2,860 Python (source ~1,940 · tests ~920)
 **Depends on:** W03, W04
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Implement the 5 specialist agents on the workflow skeleton from W04.
+Realise the specialist layer that W04 stubbed. Each of the 5 domain
+specialists follows the same uniform 10-step recipe (Design §5.5,
+ADR-011) — the recipe is the reusable :class:`SpecialistBase` template
+method. Every specialist is fully unit-testable without any real LLM /
+Compass call thanks to the :class:`SpecialistLlm` protocol seam.
 
 **In scope:**
 
-- Uniform specialist wrapper base (template method).
-- 5 `ChatAgent`-backed specialists with ReAct + structured-extraction two-pass.
-- Provenance attachment (via shared `graph_helpers`).
-- Family-history privacy strip on state write.
-- Programmatic derived fields (`pathogenic_count`, `diseases_meeting_threshold`, `genes_assessed`, `drugs_with_recommendations`, `relevant_disease_names`).
-- Specialist output types (`PRSStateOutput`, `GenomicVariantsStateOutput`, etc.) — tighten `SessionDocument.results` typing.
+- :class:`SpecialistBase` template + :class:`SpecialistLlm` protocol
+  (:class:`MafSpecialistLlm` real impl + :class:`StubSpecialistLlm` test
+  double).
+- 5 concrete specialists (`PRSSpecialist`, `GenomicVariantsSpecialist`,
+  `FamilyHistorySpecialist`, `PGXSpecialist`, `PhenotypeSpecialist`).
+- 14 tool shims (3+3+3+3+2 = 14) exposing the 5 Repositories to the
+  ReAct pass via :func:`agent_framework.tool`.
+- 5 :class:`SpecialistSlotOutput` subclasses — typed payloads carried
+  by :class:`SpecialistSlot` in place of W04's opaque dict.
+- **Family-history privacy strip applied at StateOutput construction**
+  (uses W03's :meth:`FamilyHistoryResultList.to_public`).
+- **Deterministic derived fields** per domain preserved from the
+  prototype: `pathogenic_count`, `genes_assessed`,
+  `drugs_with_recommendations`, `diseases_meeting_threshold`,
+  `relevant_disease_names`, and every `patient_id` set programmatically.
+- :class:`SpecialistExecutor` replaces W04's placeholder in the
+  orchestration workflow (topology and executor IDs unchanged).
+- Real MAF-backed :class:`MafChatRouterLlm` + :class:`MafOrchRouterLlm`
+  implementations of W04's protocol seams — W07 (auth) will wire them
+  through the API entrypoint.
+- :class:`SpecialistRegistry` + `build_specialist_registry(…)` factory
+  wired into the DI container.
+- 24 unit tests: tool shims (12), specialist base template (8),
+  per-specialist derived fields + privacy strip + provenance matching (10),
+  end-to-end via real :class:`WorkflowBuilder` with stub LLMs (2).
 
-### Sections 2–11
+**Out of scope (→ later):**
 
-Filled in when the workstream starts.
+- Live LLM calls to Compass (→ W07 integration test).
+- Shadow-parity harness vs the prototype (→ W06).
+- OTEL span decoration on `tool.call` / `llm.call` (→ W08).
+- Structured extraction schema evolution beyond the prototype's
+  (→ later, as clinical needs emerge).
+
+### 2. Mapping to the LangGraph prototype
+
+| Prototype file | New home | Change |
+|---|---|---|
+| `agents/prs/graph/graph.py::prs_node` | [`agents/prs.py::PRSSpecialist`](../../epg-maf/src/egp_maf/agents/prs.py) + [`agents/base.py::SpecialistBase.run`](../../epg-maf/src/egp_maf/agents/base.py) | 10-step recipe extracted to `SpecialistBase`; only PRS-specific hooks in `prs.py` |
+| `agents/genomic_variants/graph/graph.py::genomic_variants_node` | [`agents/genomic_variants.py::GenomicVariantsSpecialist`](../../epg-maf/src/egp_maf/agents/genomic_variants.py) | Same shape; ``annotations_json`` decomposition is done by the Repository (ADR-006, W03) — the LLM never sees the raw JSON |
+| `agents/family_history/graph/graph.py::family_history_node` | [`agents/family_history.py::FamilyHistorySpecialist`](../../epg-maf/src/egp_maf/agents/family_history.py) | Same shape; the privacy strip is `to_slot_output` (Design §11.7) |
+| `agents/pgx/graph/graph.py::pgx_node` | [`agents/pgx.py::PGXSpecialist`](../../epg-maf/src/egp_maf/agents/pgx.py) | Same shape; ``genes_assessed`` / ``drugs_with_recommendations`` derived programmatically |
+| `agents/phenotype/graph/graph.py::phenotype_node` | [`agents/phenotype.py::PhenotypeSpecialist`](../../epg-maf/src/egp_maf/agents/phenotype.py) | Same shape; ``relevant_disease_names`` derived programmatically |
+| `agents/prs/tools/tools.py` (etc ×5) | [`agents/tool_shims.py`](../../epg-maf/src/egp_maf/agents/tool_shims.py) | Per-run factories `build_<domain>_tools(repo, ctx, patient_id)` that close over the request-scoped context; the shim, not the Repository, is what the ReAct agent binds to (ADR-015) |
+| `agents/*/state/state.py::<Domain>StateOutput` | [`agents/state_outputs.py`](../../epg-maf/src/egp_maf/agents/state_outputs.py) | Consolidated into a single module; typed payloads (no more dict-in-slot) |
+| `agents/shared/state/tool_execution.py::ToolExecution` | [`agents/base.py::ToolCall`](../../epg-maf/src/egp_maf/agents/base.py) | Domain-neutral audit record; the LLM adapter (`MafSpecialistLlm`) constructs these from the MAF `AgentResponse` |
+| `agents/*/graph/graph.py::_attach_provenance` | [`agents/base.py::attach_provenance_to_results`](../../epg-maf/src/egp_maf/agents/base.py) | Single generic helper; per-domain matcher passed as a callable (ADR-011) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+| MAF primitive | Used for |
+|---|---|
+| `OpenAIChatClient.as_agent(instructions, tools)` | Builds the ReAct-capable `Agent` for each specialist run |
+| `Agent.run(messages, options=ChatOptions(temperature=0.0))` | Runs the ReAct pass |
+| `OpenAIChatClient.get_response(messages, options=ChatOptions(response_format=<schema>))` | Structured extraction (Structured Outputs) |
+| `@agent_framework.tool(name=, description=)` | Wraps the 14 domain tool shims |
+| `agent_framework.Message` / `Content(type=...)` | Message + content types passed to the client |
+
+MAF quirks noted:
+
+- MAF 1.10.0 uses `Content(type='function_call')` / `Content(type='function_result')` instead of subclasses; `MafSpecialistLlm._extract_tool_calls_from_response` handles this.
+- `FunctionTool.invoke(arguments=..., skip_parsing=True)` gives back the raw Python return value; test suite uses this shape.
+- `OpenAIChatClient(...)` takes `model=`, not `model_id=` — fixed a latent typo in W01's `compass_client._default_constructor` (surfaces only once a client is actually constructed, which W05 is the first to do).
+
+### 4. Files created
+
+<details>
+<summary>Source (13 files)</summary>
+
+```
+epg-maf/src/egp_maf/agents/__init__.py                      (re-exports)
+epg-maf/src/egp_maf/agents/base.py                          (SpecialistBase + SpecialistLlm + ToolCall + attach_provenance_to_results)
+epg-maf/src/egp_maf/agents/state_outputs.py                 (5 <Domain>StateOutput types + SpecialistSlotOutput base)
+epg-maf/src/egp_maf/agents/tool_shims.py                    (14 @tool-decorated shims across 5 domains)
+epg-maf/src/egp_maf/agents/llm_bridge.py                    (MafSpecialistLlm + StubSpecialistLlm)
+epg-maf/src/egp_maf/agents/registry.py                      (SpecialistRegistry + build_specialist_registry factory)
+epg-maf/src/egp_maf/agents/prs.py                           (PRSSpecialist)
+epg-maf/src/egp_maf/agents/genomic_variants.py              (GenomicVariantsSpecialist)
+epg-maf/src/egp_maf/agents/family_history.py                (FamilyHistorySpecialist — privacy strip in to_slot_output)
+epg-maf/src/egp_maf/agents/pgx.py                           (PGXSpecialist)
+epg-maf/src/egp_maf/agents/phenotype.py                     (PhenotypeSpecialist)
+epg-maf/src/egp_maf/workflow/orchestration/specialist_executor.py  (SpecialistExecutor — replaces W04 placeholder)
+epg-maf/src/egp_maf/workflow/router_llm_maf.py              (MafChatRouterLlm + MafOrchRouterLlm — real router LLM impls)
+```
+</details>
+
+<details>
+<summary>Tests (4 files, 24 test cases)</summary>
+
+```
+epg-maf/tests/unit/agents/__init__.py
+epg-maf/tests/unit/agents/test_tool_shims.py                (~9 tests — 14 tool shims x per-domain call routing + FH privacy)
+epg-maf/tests/unit/agents/test_specialist_base.py           (~6 tests — template pipeline + failure paths + model attribution)
+epg-maf/tests/unit/agents/test_specialists.py               (~7 tests — per-domain derived fields + provenance matching + privacy strip)
+epg-maf/tests/unit/agents/test_end_to_end.py                (~2 tests — real WorkflowBuilder end-to-end with SpecialistExecutor)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/workflow/orchestration/build.py` | `build_orchestration_workflow(…)` takes an optional `SpecialistRegistry`; wires `SpecialistExecutor` in place of the placeholder when present. |
+| `epg-maf/src/egp_maf/workflow/runtime.py` | `WorkflowRuntime.__init__` accepts and forwards a `SpecialistRegistry`. |
+| `epg-maf/src/egp_maf/di/container.py` | `Container` gains `specialist_registry: SpecialistRegistry`; `build_container` constructs 5 repositories + the registry + wires it into `WorkflowRuntime`. |
+| `epg-maf/src/egp_maf/infrastructure/compass_client.py` | Latent W01 typo fixed: `OpenAIChatClient(model=..., ...)` (was `model_id=`, which crashed on first real client construction). |
+| `epg-maf/tests/unit/test_di_container.py` | Fake factory constructs an empty `SpecialistRegistry`; test asserts container now exposes it wired with all 5 specialist names. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**One template, five specialists, zero duplication.**
+:class:`SpecialistBase.run` is the 10-step recipe (input read → ReAct →
+extraction → provenance → model attribution → derived fields → slot
+wrap). Each concrete specialist provides 5 seams: `build_tools`,
+`build_extraction_instruction`, `response_schema`, `build_provenance`,
+`apply_derived_fields`, `to_slot_output`. Everything else is inherited
+— there is no per-specialist duplication of the tool-trace parsing,
+provenance matching, or model-attribution logic that the prototype
+repeated in each `_node` function.
+
+**LLM calls behind a narrow protocol.**
+:class:`SpecialistLlm` has exactly two methods (`run_react`,
+`run_extraction`). Production wiring is
+:class:`~egp_maf.agents.llm_bridge.MafSpecialistLlm`; every W05 unit
+test uses :class:`StubSpecialistLlm` for deterministic runs. The
+protocol shape is what makes the W05 test suite fast (`10s` for the
+full unit suite of 236 tests) and reliable (zero flakiness from LLM
+nondeterminism).
+
+**Family-history privacy strip lives at exactly the two places it
+must: the tool shim boundary and the state-output boundary.**
+The `get_patient_family_history` shim calls `.to_public()` on every
+result **before** the ReAct LLM sees it (Design ADR-017). The
+`FamilyHistorySpecialist.to_slot_output` calls `.to_public()` a second
+time on the internal result-list held by the specialist's own pipeline
+before wrapping it in the `FamilyHistoryStateOutput`. Both boundaries
+are unit-tested; both public payloads have the three privacy field
+names absent from the type itself — not merely null.
+
+**Provenance is per-tool, per-result, matched by domain-specific
+composite key.** The generic :func:`attach_provenance_to_results`
+helper (:mod:`egp_maf.agents.base`) takes a `row_matches_result`
+callable so each domain matches on its own identifier: `prs_name`,
+`variant_id`, `(disease_name, criteria_name)`, `(gene, drug)`, or
+`disease_name`. Only the `get_*` tools appear in the source table map
+(matching prototype behaviour — Discovery §5.7).
+
+**Programmatic derived fields never involve the LLM.** `PGXResultList.
+genes_assessed`, `PGXResultList.drugs_with_recommendations`,
+`FamilyHistoryResultList.diseases_meeting_threshold`,
+`GenomicVariantsResultList.pathogenic_count`,
+`PhenotypeResultList.relevant_disease_names`, and every
+`ResultList.patient_id` are set in `apply_derived_fields` after the
+extraction pass, exactly matching the prototype's post-extraction
+semantics.
+
+**The workflow topology and executor IDs are unchanged from W04.**
+`build_orchestration_workflow(specialist_registry=None)` still
+produces the exact W04 shape (5 placeholder executors) so W04-era
+tests keep working; supplying a registry only replaces the executor
+implementations at each of the 5 fixed positions.
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| Tool shims (14 shims x 5 domains) | `tests/unit/agents/test_tool_shims.py` | ~9 | unit |
+| Specialist template + failure paths | `tests/unit/agents/test_specialist_base.py` | ~6 | unit |
+| Per-domain derived fields + provenance + privacy | `tests/unit/agents/test_specialists.py` | ~7 | unit |
+| End-to-end via real `WorkflowBuilder` | `tests/unit/agents/test_end_to_end.py` | ~2 | unit |
+| DI wiring | `tests/unit/test_di_container.py` | +1 | unit |
+| **W05 subtotal** | | **~25** | |
+| **Programme total (W01–W05)** | | **236 passing** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+.\.venv\Scripts\python.exe -m pytest -m "not integration and not parity" -q
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+Structural + behavioural parity is preserved by construction: every
+specialist's ReAct instruction and structured-extraction prompt is a
+port of the prototype's; the derived-field computations are
+line-for-line ports; the JSON parser is the same one W03 shipped
+(ADR-006). Live-LLM shadow parity is a W06 deliverable per the
+Engineering Plan ("F07.x — Shadow test: same input, prototype output
+≡ target output modulo whitespace in `summary`").
+
+### 9. Validation Checklist (paste into PR)
+
+**Tool shims**
+
+- [ ] `pytest tests/unit/agents/test_tool_shims.py -v` — all green.
+- [ ] Each shim closes over `(ctx, patient_id)` from `build_<domain>_tools`.
+- [ ] Family-history `get_patient_family_history` shim serialises the **public** projection — the three privacy fields absent from every row.
+- [ ] All 14 shims registered with correct names (`explore_patient_*`, `search_*_annotations`, `get_patient_*`, `get_patient_diagnoses`).
+
+**Specialist template**
+
+- [ ] `pytest tests/unit/agents/test_specialist_base.py -v` — all green.
+- [ ] `SpecialistBase.run` never raises — all exceptions produce a `status='failed'` slot with a populated `errors` list.
+- [ ] `interpretation_model` / `summary_model` are set from the specialist's `interpretation_model_name` **only when** the LLM populated an interpretation/summary and no upstream attribution exists.
+
+**Per-domain derived fields**
+
+- [ ] `pytest tests/unit/agents/test_specialists.py -v` — all green.
+- [ ] PRS: provenance matched on `prs_name`; only `get_patient_prs` produces provenance.
+- [ ] PGX: `patient_id`, `genes_assessed`, `drugs_with_recommendations` set programmatically; provenance matched on `(gene, drug)`.
+- [ ] Phenotype: `patient_id`, `relevant_disease_names` derived from LLM `relevant_to_query` flag.
+- [ ] Genomic variants: `pathogenic_count` equals `sum(1 for r in results if r.core_annotations.pathogenicity in {"Pathogenic", "Likely Pathogenic"})`.
+- [ ] Family history: `diseases_meeting_threshold` = sorted set of `disease_name` where `meets_threshold=True`.
+- [ ] Family history StateOutput payload type is `FamilyHistoryResultListPublic` (not `FamilyHistoryResultList`).
+
+**Privacy**
+
+- [ ] `grep -R 'search_context_notes' epg-maf/src/egp_maf/agents/` returns hits only in `family_history.py`.
+- [ ] `grep -R 'affected_relative_count' epg-maf/src/egp_maf/agents/` — same file only.
+- [ ] `FamilyHistoryResultListPublic.model_fields` does not contain the three privacy names.
+
+**End-to-end workflow**
+
+- [ ] `pytest tests/unit/agents/test_end_to_end.py -v` — all green.
+- [ ] Running the chat workflow with the PRS specialist wired writes a serialised `PRSStateOutput` payload to `state.prs.output` and appends `'prs'` to `agents_completed`.
+- [ ] Running with family_history wired confirms no privacy fields reach the outer state.
+
+**Repository hygiene**
+
+- [ ] `git status --porcelain agents/ config/ test_data/ tests/` is empty (prototype untouched).
+- [ ] No `agent_framework` imports in `egp_maf.state.*` or `egp_maf.services.repositories.*` (specialist layer is the outermost boundary that touches MAF, per Design ADR-015).
+
+### 10. Known follow-ups (out of scope for W05)
+
+- **Live LLM integration test** (→ W07) — the current pipeline is fully exercised only with the stub LLM in unit tests; W07 adds a preprod integration test that fires a real Compass call end-to-end.
+- **Shadow-parity harness** (→ W06) — golden question suite runs against both the prototype and the target, comparing structured fields with the free-text `summary` allowed to differ modulo whitespace.
+- **OTEL span decoration on tool calls + LLM calls** (→ W08).
+- **Session-persistence checkpointer** wiring the `WorkflowRuntime` to `ThreadStateProvider` (→ W07).
+- **Structured-output schema strict-mode** (Design ADR-021) — tracked; currently the model can still return `Dict[str, Any]` in `raw_annotations`, matching the prototype.
+
+### 11. Sign-off
+
+- [ ] SA — specialist template + protocol seam review
+- [ ] BE2 — implementation reviewer
+- [ ] BIX — prompt binding + extraction instruction review
+- [ ] QA — test coverage sign-off
 
 ---
 
@@ -1441,3 +1690,4 @@ Filled in when the workstream starts.
 | 2026-07-09 | W03 (Domain Repositories) implementation complete. 5 repositories + typed result models + deterministic JSON parser + family-history privacy strip. Section filled in; dashboard + diagram updated. | Delivery Lead |
 | 2026-07-09 | W03 pre-push: drive-by fixes to keep pytest fully green — repaired PEP 3110 scoping bug in `tests/unit/test_errors.py::test_error_chain` and silenced two Pydantic 2.11 `model_fields`-on-instance deprecation warnings in the two W03 family-history tests. Behaviour unchanged. | Delivery Lead |
 | 2026-07-09 | W04 (MAF Workflow Skeleton) implementation complete. Chat + orchestration sub-workflow on `agent-framework 1.10.0`; state models with set-append reducer; router decision types; fan-out plumbing dormant at width 1; iteration budget with typed `RoutingBudgetExceeded`. 49 new unit tests; 212 total passing. | Delivery Lead |
+| 2026-07-09 | W05 (Specialist Agents) implementation complete. `SpecialistBase` template + 5 concrete specialists with domain-specific derived fields + family-history privacy strip; 14 `@tool` shims; MAF-backed `SpecialistLlm` bridge; `SpecialistExecutor` replaces W04 placeholder; `SpecialistRegistry` wired via DI. Latent W01 `OpenAIChatClient(model_id=)` typo fixed on the way through. 24 new unit tests; 236 total passing. | Delivery Lead |

@@ -2,12 +2,16 @@
 
 Owns two built :class:`Workflow` objects (chat + orchestration) and exposes
 a single :meth:`run` method taking a fresh :class:`ChatWorkflowState`.
-W04 uses stub router/synthesis LLMs; W05 wires the real Compass clients.
+
+W04 shipped stub router / synthesis LLMs and stub specialist executors;
+W05 accepts a :class:`SpecialistRegistry` and real router LLMs so the
+orchestration positions are wired to real :class:`SpecialistExecutor`s.
+The optional-registry contract keeps W04-era smoke tests working.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_framework import Workflow
 
@@ -22,6 +26,9 @@ from egp_maf.workflow.orchestration.build import build_orchestration_workflow
 from egp_maf.workflow.router_llm import OrchRouterLlm, RouterLlm
 from egp_maf.workflow.state import ChatWorkflowState
 
+if TYPE_CHECKING:  # pragma: no cover
+    from egp_maf.agents.registry import SpecialistRegistry
+
 _logger = get_logger(__name__)
 
 
@@ -35,11 +42,13 @@ class WorkflowRuntime:
         chat_router_llm: RouterLlm,
         orch_router_llm: OrchRouterLlm,
         synthesis_llm: SynthesisLlm | None = None,
+        specialist_registry: "SpecialistRegistry | None" = None,
     ) -> None:
         self._settings = settings
         self._orchestration_workflow: Workflow = build_orchestration_workflow(
             router_llm=orch_router_llm,
             settings=settings,
+            specialist_registry=specialist_registry,
         )
         self._chat_workflow: Workflow = build_chat_workflow(
             router_llm=chat_router_llm,
@@ -51,6 +60,11 @@ class WorkflowRuntime:
             dispatch_mode=settings.orch_dispatch_mode.value,
             max_fanout_width=settings.orch_max_fanout_width,
             iteration_budget=settings.orch_iteration_budget,
+            specialists_wired=(
+                specialist_registry.names()
+                if specialist_registry is not None
+                else []
+            ),
         )
 
     @property

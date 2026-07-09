@@ -108,11 +108,17 @@ class LlmClientFactory:
     def _default_constructor(
         *, api_key: str, base_url: str, model_id: str
     ) -> "OpenAIChatClient":
-        """Default constructor — real MAF ``OpenAIChatClient``."""
+        """Default constructor — real MAF ``OpenAIChatClient``.
+
+        Note ``model_id`` is the shim's kwarg name for consistency with
+        the prototype's ``config/llm.py``; MAF 1.10.0's
+        ``OpenAIChatClient`` takes ``model`` as the positional/keyword
+        argument, so we adapt here.
+        """
         from agent_framework.openai import OpenAIChatClient  # type: ignore[import-untyped]
 
         return OpenAIChatClient(
+            model=model_id,
             api_key=api_key,
             base_url=base_url,
-            model_id=model_id,
         )
