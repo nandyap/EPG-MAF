@@ -20,6 +20,7 @@ from egp_maf.services.thread_state import ThreadStateProvider
 if TYPE_CHECKING:  # pragma: no cover
     from egp_maf.auth.audit import AuditEventEmitter
     from egp_maf.auth.authenticator import Authenticator
+    from egp_maf.telemetry import MetricEmitter, TelemetryProvider
 
 
 # ── Test doubles ─────────────────────────────────────────────────────
@@ -103,10 +104,24 @@ def _build_test_container(settings: Settings) -> tuple[
         authz_policy=OpenAuthzPolicy(),
         audit_emitter=_audit_emitter(),
         authenticator=_stub_authenticator(settings),
+        telemetry_provider=_telemetry_provider(settings),
+        metric_emitter=_null_metric_emitter(),
         specialist_registry=empty_registry,
         workflow_runtime=workflow_runtime,
     )
     return container, db, cosmos, prompt
+
+
+def _telemetry_provider(settings: Settings) -> "TelemetryProvider":
+    from egp_maf.telemetry import build_telemetry_provider
+
+    return build_telemetry_provider(settings)
+
+
+def _null_metric_emitter() -> "MetricEmitter":
+    from egp_maf.telemetry import NullMetricEmitter
+
+    return NullMetricEmitter()
 
 
 def _audit_emitter() -> "AuditEventEmitter":
@@ -220,3 +235,9 @@ class TestBuildContainerWiring:
         assert isinstance(container.audit_emitter, AuditEventEmitter)
         assert isinstance(container.authenticator, Authenticator)
         assert isinstance(container.authenticator, StubAuthenticator)
+
+        # W08 addition — telemetry + metric emitter wired.
+        from egp_maf.telemetry import MetricEmitter, TelemetryProvider
+
+        assert isinstance(container.telemetry_provider, TelemetryProvider)
+        assert isinstance(container.metric_emitter, MetricEmitter)

@@ -17,6 +17,7 @@ from agent_framework import Executor, WorkflowContext, handler
 
 from egp_maf.agents.base import SpecialistBase, SpecialistInputs, SpecialistLlm
 from egp_maf.logging.setup import get_logger
+from egp_maf.telemetry import specialist_span
 from egp_maf.workflow.decisions import SpecialistName
 from egp_maf.workflow.orchestration.dispatcher import SpecialistDispatch
 from egp_maf.workflow.state import (
@@ -74,9 +75,15 @@ class SpecialistExecutor(Executor):
                 else message.state.requested_diseases
             ),
         )
-        slot_output = await self._specialist.run(
-            inputs=inputs, ctx=message.state.ctx, llm=self._llm
-        )
+        # W08: one span per specialist run; provenance built inside the
+        # specialist inherits the trace/span ids via
+        # ``get_current_trace_and_span_ids`` (Design §20.6).
+        with specialist_span(
+            self._name, patient_id=inputs.patient_id
+        ) as _:
+            slot_output = await self._specialist.run(
+                inputs=inputs, ctx=message.state.ctx, llm=self._llm
+            )
 
         # Map the domain SpecialistSlotOutput's status onto the
         # workflow's SpecialistSlot envelope. Payload is serialised for

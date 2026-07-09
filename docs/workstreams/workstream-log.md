@@ -7,7 +7,7 @@
 
 **Repository:** `nandyap/EPG-MAF` (private, GitHub)
 **Baseline documents:** [architecture-discovery-report.md](../architecture-discovery-report.md) · [solution-design-package.md](../solution-design-package.md) · [engineering-implementation-plan.md](../engineering-implementation-plan.md)
-**Last updated:** 2026-07-09
+**Last updated:** 2026-07-16
 
 ---
 
@@ -47,7 +47,7 @@ Every workstream section carries the same subsections in the same order:
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ✅ Complete | 4–5 | BE2 | 13 / 4 | ~2,860 | W03, W04 |
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ✅ Complete | 5 | BE1 + QA | 2 / 5 + 2 docs | ~770 | W04, W05 |
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ✅ Complete | 6 | BE2 + SEC | 5 + 3 + 1 bicep + 2 docs | ~1,300 | W01, W03 |
-| W08 | [Observability](#workstream-w08--observability-) | ⏳ Not started | 6 | PE + BE1 | — | — | W01, W04, W05 |
+| W08 | [Observability](#workstream-w08--observability-) | ✅ Complete | 6 | PE + BE1 | 6 + 4 (wired) / 7 + conftest + 2 docs | ~1,410 | W01, W04, W05 |
 | W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ⏳ Not started | 6 | BE1 | — | — | W04, W05 |
 | W10 | [Testing, Evaluation & Load](#workstream-w10--testing-evaluation--load-) | ⏳ Not started | 7 | QA | — | — | W05, W08 |
 | W11 | [Cutover, Release & Runbooks](#workstream-w11--cutover-release--runbooks-) | ⏳ Not started | 8 | PE + SA | — | — | All previous |
@@ -79,7 +79,8 @@ flowchart LR
     class W05 done
     class W06 done
     class W07 done
-    class W08,W09,W10,W11 pending
+    class W08 done
+    class W09,W10,W11 pending
 ```
 
 ---
@@ -2034,28 +2035,303 @@ declared but unused). W07 is a net-new capability, not a port.
 
 ---
 
-## Workstream W08 — Observability ⏳
+## Workstream W08 — Observability ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 6
-**Owner:** PE + BE1
-**Depends on:** W01, W04, W05
+**Owner:** PE + BE1 (implementation), SA (design confirmation)
+**PR gate reviewers:** PE · SA · BE1
+**Files:** 6 telemetry-module + 4 test-module wiring + 1 conftest + 2 docs; DI container + Repository base + LLM bridge + SpecialistExecutor updated
+**LOC:** ~1,410 (source ~912 · tests ~496 · docs + wiring deltas ~100)
+**Depends on:** W01 (Settings + DI), W04 (SpecialistExecutor spans), W05 (LLM-bridge spans)
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-OpenTelemetry tracing, structured metrics, PHI-safe serializer, provenance ↔ trace correlation.
+Everything that came before now works — W08 makes it **observable**.
+Every workflow step, specialist run, tool call, LLM call, repository
+call and DB query emits a span. Every one of the 10 KPI metrics from
+Design §20.4 has an instrument. Provenance rows carry
+`trace_id`/`span_id` so a clinician can jump from a suggestion → the
+span that produced it. And a **PHI-safe attribute allowlist** with
+CI-enforceable helpers guarantees we never accidentally leak family
+history, prompts, or row bodies into a span attribute.
+
+Maps to Engineering Plan **E10** (F10.1 SDK bootstrap, F10.2 span
+taxonomy, F10.3 metric taxonomy, F10.4 PHI-safe serializer,
+F10.5 provenance-trace correlation). The App-Insights OTLP exporter
+(the second half of F10.1) is deferred to W11 with the FastAPI /
+auto-instrumentation layer.
 
 **In scope:**
 
-- OTEL SDK + App Insights OTLP exporter + auto-instrumentation.
-- Custom span taxonomy: `workflow.request`, `workflow.executor`, `tool.call`, `llm.call`, `db.query`.
-- Metrics: 10 metrics from Design §20.4.
-- PHI-safe serializer with CI-enforced allowlist (Design §10.4).
-- `DBProvenance` carries `trace_id` and `span_id` from active spans.
+- :class:`TelemetryProvider` bootstrap — one call at process start,
+  installs OTEL `TracerProvider` + `MeterProvider` with a `Resource`
+  carrying `service.name=egp-window`, `service.namespace=egp-maf`,
+  `deployment.environment=<settings>`.
+- :class:`SpanKind` StrEnum + 7 span context managers
+  (`workflow_request_span`, `workflow_executor_span`, `specialist_span`,
+  `tool_span`, `llm_span`, `repository_span`, `db_span`) that all use
+  the same PHI-safe attribute filter.
+- :class:`MetricEmitter` protocol + `NullMetricEmitter`
+  + `OtelMetricEmitter` — exactly 10 metric instruments matching
+  Design §20.4 (turn count/duration, specialist duration/failed, tool
+  duration, prompt/completion tokens, pool utilisation, rate-limit hit,
+  prompt-fallback).
+- **PHI-safe attribute layer** — `ALLOWED_ATTRIBUTES` frozenset
+  (~50 names, grouped) + `FORBIDDEN_ATTRIBUTES` frozenset that
+  explicitly enumerates the family-history trio
+  (`search_context_notes`, `affected_relative_count`,
+  `total_relatives_searched`), LLM content
+  (`prompt_text`, `completion_text`, `message.content`), row body
+  (`row.body`, `row.content`, `source_row`) and tool result
+  (`tool.result`, `tool.output`). :func:`safe_set_attribute` raises
+  :class:`ForbiddenAttributeError` on forbidden keys and silently drops
+  unknown-but-not-forbidden ones — so dashboards notice missing
+  columns, not runtime crashes.
+- **Provenance ↔ trace correlation** — :class:`ProvenanceService` now
+  accepts an `otel_context_provider` callable and stamps every
+  `DBProvenance` row with the active span's `trace_id` + `span_id`.
+  Non-throwing — a broken provider yields `(None, None)`.
+- **Wiring** — Repository `_fetch_all` now runs inside `db_span`,
+  `MafSpecialistLlm.run_react` / `run_extraction` inside `llm_span`,
+  `SpecialistExecutor.handle_dispatch` inside `specialist_span`, DI
+  container exposes `telemetry_provider` + `metric_emitter` singletons.
+- **Two docs:**
+  [`docs/observability/spans.md`](../observability/spans.md) — the span
+  taxonomy + attribute allowlist + a KQL query cookbook.
+  [`docs/observability/metrics.md`](../observability/metrics.md) — the
+  10 metrics + labels + example App Insights KQL/Grafana queries.
+- 38 new unit tests: attribute allowlist shape, PHI-safe helper,
+  telemetry provider lifecycle, all 7 span kinds (attributes +
+  hierarchy + error status + PHI dropping), 10-metric instrument
+  contract, provenance-trace correlation end-to-end.
 
-### Sections 2–11
+**Out of scope (→ later):**
 
-Filled in when the workstream starts.
+- **Azure Monitor OTLP exporter wiring** — `TelemetryProvider` today
+  installs an in-memory exporter (for the container test suite and
+  local dev). W11 (Cutover) wires the OTLP exporter that pushes to App
+  Insights.
+- **Auto-instrumentation of libraries** (psycopg, aiohttp, FastAPI) —
+  arrives with the HTTP layer in W11.
+- **AuditEvent.trace_id populated** — W07 reserved the field; W08
+  provides the `get_current_trace_and_span_ids` helper the
+  `AuditEventEmitter` will call once the FastAPI middleware exists.
+- **Grafana / App Insights dashboards** — F10.4 acceptance artefact,
+  arrives with W11.
+- **CI PHI-hygiene gate** — the `safe_set_attribute` helper is the
+  runtime guard; the static-analysis / grep gate is a W10 task.
+
+### 2. Mapping to the engineering plan
+
+| Plan feature | Deliverable | Where |
+|---|---|---|
+| **F10.1** — OTEL SDK + Resource + provider lifecycle | :class:`TelemetryProvider` + :func:`build_telemetry_provider` (in-memory exporter today; App Insights OTLP arrives in W11) | [`telemetry/otel.py`](../../epg-maf/src/egp_maf/telemetry/otel.py) |
+| **F10.2** — Custom span taxonomy (`workflow.request`, `workflow.executor`, `tool.call`, `llm.call`, `db.query`) | :class:`SpanKind` StrEnum + 7 context managers (5 required + 2 useful — `specialist`, `repository`) | [`telemetry/spans.py`](../../epg-maf/src/egp_maf/telemetry/spans.py) |
+| **F10.2** — LLM spans expose `model`, `phase`, `prompt_tokens`, `completion_tokens` | `llm_span(model=..., phase=..., structured_output=...)` + `llm.prompt_tokens` / `llm.completion_tokens` on the allowlist | [`telemetry/spans.py`](../../epg-maf/src/egp_maf/telemetry/spans.py), [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py) |
+| **F10.2** — DB spans expose `table`, `row_count`, `duration_ms` | `db_span(table=..., operation=...)` + `_infer_table(sql)` regex in `BaseRepository` | [`telemetry/spans.py`](../../epg-maf/src/egp_maf/telemetry/spans.py), [`services/repositories/base.py`](../../epg-maf/src/egp_maf/services/repositories/base.py) |
+| **F10.2** — Nested spans inherit `trace_id` | Tested via `TestNestedSpans::test_child_inherits_trace_id` | [`tests/unit/telemetry/test_spans.py`](../../epg-maf/tests/unit/telemetry/test_spans.py) |
+| **F10.2** — `KNOWN_ATTRIBUTES` set (CI check) | `ALLOWED_ATTRIBUTES` frozenset; test asserts canonical names present | [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py), [`tests/unit/telemetry/test_attributes.py`](../../epg-maf/tests/unit/telemetry/test_attributes.py) |
+| **F10.3** — 10 KPI metrics (Design §20.4) | `METRIC_NAMES` frozenset + `OtelMetricEmitter` w/ 8 `emit_*` methods, 4 counters + 3 histograms + 1 up-down counter | [`telemetry/metrics.py`](../../epg-maf/src/egp_maf/telemetry/metrics.py) |
+| **F10.3** — Cardinality bounded (labels enumerated) | Every `emit_*` accepts named kwargs matching the design's label set; no `patient_id` in any label | [`telemetry/metrics.py`](../../epg-maf/src/egp_maf/telemetry/metrics.py) |
+| **F10.4** — PHI-safe attribute allowlist enforced at emit | `ALLOWED_ATTRIBUTES` + `FORBIDDEN_ATTRIBUTES` + `safe_set_attribute` (raises on forbidden) + `filter_safe_attributes` (used by every span helper) | [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py), [`telemetry/phi_safe.py`](../../epg-maf/src/egp_maf/telemetry/phi_safe.py) |
+| **F10.4** — Family-history trio explicitly forbidden | Named in `FORBIDDEN_ATTRIBUTES` + covered by `TestPhiSafetyInSpans` | [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py) |
+| **F10.4** — LLM prompt/completion content forbidden | `prompt_text`, `completion_text`, `message.content`, `messages.content` all in `FORBIDDEN_ATTRIBUTES` | [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py) |
+| **F10.4** — Row body forbidden | `row.body`, `row.content`, `source_row` all in `FORBIDDEN_ATTRIBUTES` | [`telemetry/attributes.py`](../../epg-maf/src/egp_maf/telemetry/attributes.py) |
+| **F10.4** — Attempt to emit forbidden name raises in tests | `test_phi_safe.py::test_forbidden_attribute_raises` | [`tests/unit/telemetry/test_phi_safe.py`](../../epg-maf/tests/unit/telemetry/test_phi_safe.py) |
+| **F10.5** — `DBProvenance` carries `trace_id`/`span_id` | `ProvenanceService(otel_context_provider=...)` + `get_current_trace_and_span_ids()` helper | [`services/provenance.py`](../../epg-maf/src/egp_maf/services/provenance.py) (already had the fields; W08 wires the provider), [`telemetry/otel.py`](../../epg-maf/src/egp_maf/telemetry/otel.py) |
+| **F10.5** — Correlation covered by test | `test_provenance_trace.py::test_provenance_gets_trace_and_span_when_inside_span` | [`tests/unit/telemetry/test_provenance_trace.py`](../../epg-maf/tests/unit/telemetry/test_provenance_trace.py) |
+| Dashboards (not an F-number — falls under E10 objective, not a specific F) | Not this WS — arrives with W11. Spans + metrics + KQL cookbook shipped instead | [`docs/observability/spans.md`](../observability/spans.md), [`docs/observability/metrics.md`](../observability/metrics.md) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**MAF doesn't own OTEL — we do.** MAF's `ChatAgent` and `Workflow`
+runtime never call `trace.set_tracer_provider`; W08's
+`TelemetryProvider.install_globally()` is the sole owner of the global
+providers. Every custom span we open is a *sibling* of any span MAF's
+auto-instrumentation might one day open (none today), so trace
+hierarchies remain clean without special integration code.
+
+The four wired call-sites (Repository base, LLM bridge,
+SpecialistExecutor, DI container) are the exact seams W01–W07 designed
+in — no changes to MAF's public surface, no monkey-patching, no
+subclassing.
+
+### 4. Files created
+
+<details>
+<summary>Source (6 telemetry-module files)</summary>
+
+```
+epg-maf/src/egp_maf/telemetry/__init__.py           (re-exports)
+epg-maf/src/egp_maf/telemetry/attributes.py         (ALLOWED_ATTRIBUTES + FORBIDDEN_ATTRIBUTES + filter helper)
+epg-maf/src/egp_maf/telemetry/phi_safe.py           (ForbiddenAttributeError + safe_set_attribute)
+epg-maf/src/egp_maf/telemetry/otel.py               (TelemetryProvider + build_telemetry_provider + get_current_trace_and_span_ids)
+epg-maf/src/egp_maf/telemetry/spans.py              (SpanKind + 7 context managers)
+epg-maf/src/egp_maf/telemetry/metrics.py            (MetricEmitter + Null/OtelMetricEmitter + METRIC_NAMES)
+```
+</details>
+
+<details>
+<summary>Tests (7 files + conftest, 38 test cases)</summary>
+
+```
+epg-maf/tests/unit/telemetry/__init__.py
+epg-maf/tests/unit/telemetry/conftest.py            (session-scoped provider + telemetry_exporter + telemetry_metric_reader fixtures)
+epg-maf/tests/unit/telemetry/test_attributes.py     (~7 tests — allowlist shape + forbidden set + filter)
+epg-maf/tests/unit/telemetry/test_phi_safe.py       (~4 tests — safe_set_attribute allowed/forbidden/unknown/None)
+epg-maf/tests/unit/telemetry/test_otel.py           (~5 tests — provider lifecycle + trace/span id helper)
+epg-maf/tests/unit/telemetry/test_spans.py          (~11 tests — 7 span kinds + nesting + errors + PHI)
+epg-maf/tests/unit/telemetry/test_metrics.py        (~8 tests — 10-metric contract + Null/Otel emitters)
+epg-maf/tests/unit/telemetry/test_provenance_trace.py (~3 tests — trace_id/span_id populated in DBProvenance)
+```
+</details>
+
+<details>
+<summary>Docs (2 files)</summary>
+
+```
+docs/observability/spans.md                         (span taxonomy + attributes + KQL cookbook)
+docs/observability/metrics.md                       (10 metrics + labels + example queries)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/services/repositories/base.py` | `_fetch_all` wrapped in `db_span(table=<inferred>, operation="SELECT")`; regex-inferred table name; sets `db.row_count` on success. |
+| `epg-maf/src/egp_maf/agents/llm_bridge.py` | `MafSpecialistLlm.run_react` runs inside `llm_span(model=..., phase="react")`; `run_extraction` inside `llm_span(..., phase="extract", structured_output=True)`. |
+| `epg-maf/src/egp_maf/workflow/orchestration/specialist_executor.py` | `handle_dispatch` wraps the `self._specialist.run(...)` call in `specialist_span(name, patient_id=...)`. |
+| `epg-maf/src/egp_maf/di/container.py` | `Container` exposes `telemetry_provider` + `metric_emitter` singletons; `build_container` constructs both; `ProvenanceService` gets the `otel_context_provider`. |
+| `epg-maf/tests/unit/test_di_container.py` | Test factory builds the two new singletons via `_telemetry_provider(settings)` + `_null_metric_emitter()`; wiring test asserts both types. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**One-shot global provider — via a session-scoped conftest.** OTEL's
+`trace.set_tracer_provider` is a one-shot per process; the second call
+logs a warning and silently no-ops. We install the SDK-backed provider
+exactly once at process start (`TelemetryProvider.install_globally`),
+and the test suite uses a session-scoped
+`conftest.py::_ensure_session_provider` that installs an in-memory
+exporter + metric reader once and hands them to each test via the
+`telemetry_exporter` / `telemetry_metric_reader` fixtures.
+
+**PHI-safe attributes are the point of the whole module.** Every span
+helper funnels its kwargs through `filter_safe_attributes` before
+calling `set_attribute`, and `safe_set_attribute` is the manual
+escape-hatch that *raises* on forbidden keys so a developer can never
+merge code that emits a forbidden attribute. The forbidden set names
+each family-history-derived attribute explicitly so future refactors
+can't accidentally shadow one under a new name.
+
+**Deterministic span names + attribute shape.** `SpanKind` is a
+`StrEnum` — no free-form strings sprinkled around the codebase. Every
+attribute name is a constant in `ALLOWED_ATTRIBUTES`. Together they
+make the App Insights KQL queries (docs/observability) exact-match
+instead of regex-match.
+
+**Duration is computed by the span helper, not the caller.**
+`specialist_span`, `tool_span`, `llm_span`, `repository_span` all
+record their own `*.duration_ms` via `time.perf_counter()` bracketing
+the `yield`. Callers never do arithmetic. Error paths still set the
+duration (finally-guarded), then record the exception and re-raise.
+
+**Provenance-trace correlation is opt-in.** `ProvenanceService` takes
+an `otel_context_provider: Callable[[], tuple[str|None, str|None]]`.
+Production (`build_container`) passes `get_current_trace_and_span_ids`;
+tests that don't care pass a `lambda: (None, None)`. The provider is
+called inside a `try/except` inside `ProvenanceService` — a broken
+OTEL setup can never break provenance.
+
+**Ten metrics, hand-counted.** `METRIC_NAMES` is a `frozenset` of
+exactly 10 names — the same set Design §20.4 enumerates. A test asserts
+the count and the names. `OtelMetricEmitter` creates 4 `Counter`, 3
+`Histogram`, 1 `UpDownCounter` instruments plus two duration
+histograms; every one is emitted through an `emit_*` method that keeps
+labels to the allowed set.
+
+### 7. Test coverage summary
+
+| Test file | Count | What it proves |
+|---|---|---|
+| `test_attributes.py` | 7 | `ALLOWED_ATTRIBUTES` non-empty, disjoint from `FORBIDDEN_ATTRIBUTES`, family-history trio + LLM-content + row-body all forbidden, `filter_safe_attributes` drops the right keys. |
+| `test_phi_safe.py` | 4 | Allowed key set; forbidden key raises `ForbiddenAttributeError`; unknown key silently dropped; `None` value silently dropped. |
+| `test_otel.py` | 5 | `TelemetryProvider` carries the correct `Resource`; shutdown is idempotent; span exporter is `InMemorySpanExporter` by default; `get_current_trace_and_span_ids` returns `(None, None)` outside a span and (32-hex, 16-hex) inside one. |
+| `test_spans.py` | 11 | All 7 span kinds emit under the right name; nested spans share `trace_id`; specialist success → `completed`, exception → `failed` (+ `error.class`); tool/llm/db attach `*.duration_ms`; PHI-safe filter drops forbidden extras; direct `safe_set_attribute` raises. |
+| `test_metrics.py` | 8 | Exactly 10 metric names; `NullMetricEmitter` is a no-op; `OtelMetricEmitter` records into the meter provider; each `emit_*` maps to the right instrument type. |
+| `test_provenance_trace.py` | 3 | Inside a span → `trace_id`/`span_id` populated; outside a span → both `None`; a broken provider still yields `None`s without raising. |
+| **Total new** | **38** | | 
+| **Regression** | 292 unchanged, 4 wiring tests updated | Full suite: **330 passed, 21 skipped** (integration only). |
+
+### 8. Validation vs. LangGraph prototype
+
+The prototype has zero OTEL — LangGraph uses print-style logging and
+LangSmith runs. So byte-parity isn't meaningful for W08. What we
+validated instead:
+
+- **No prototype behaviour changed.** All W02/W03/W04/W05 tests still
+  pass byte-for-byte (same 292 tests). The four wired files
+  (`base.py`, `llm_bridge.py`, `specialist_executor.py`,
+  `container.py`) had spans layered around existing calls, not into
+  them.
+- **Provenance shape unchanged from W02.** `DBProvenance` gained two
+  optional string fields (`trace_id`, `span_id`) in W02; W08 populates
+  them but every existing test that doesn't wire the provider still
+  gets `None`, which is the W02 behaviour.
+- **Family-history PHI stripping (W03) is now double-guarded.** Layer 1
+  (the tool shim in W03) filters row content before it reaches state.
+  Layer 2 (W08's `FORBIDDEN_ATTRIBUTES`) refuses to accept the same
+  names as span attributes even if a future developer bypassed layer 1.
+
+### 9. Validation checklist (paste into PR)
+
+- [x] All 5 required span kinds emit (F10.2)
+- [x] Nested spans preserve `trace_id` (F10.2)
+- [x] All 10 KPI metrics from Design §20.4 have instruments (F10.3)
+- [x] PHI-safe allowlist + forbidden set enumerated (F10.4)
+- [x] Family-history trio explicitly forbidden (F10.4)
+- [x] LLM prompt/completion content forbidden (F10.4)
+- [x] Row body / source_row forbidden (F10.4)
+- [x] `DBProvenance.trace_id` + `span_id` populated inside a span (F10.5)
+- [x] Broken OTEL provider never crashes provenance (F10.5)
+- [x] DI container exposes `telemetry_provider` + `metric_emitter` (F10.1)
+- [x] Repository base wraps queries in `db_span` (F10.2)
+- [x] LLM bridge wraps calls in `llm_span` (F10.2)
+- [x] SpecialistExecutor wraps runs in `specialist_span` (F10.2)
+- [x] Docs: `docs/observability/spans.md` + `docs/observability/metrics.md`
+- [x] 38 new unit tests pass; full suite 330 passed / 21 skipped
+- [x] No prototype tree (`agents/`, `config/`, `test_data/`) modified
+
+### 10. Known follow-ups (out of scope for W08)
+
+- **Azure Monitor OTLP exporter** — swap the in-memory exporter for
+  the OTLP one at `build_telemetry_provider` time; owned by W11.
+- **Auto-instrumentation** (psycopg, aiohttp, FastAPI) — arrives with
+  the HTTP layer in W11.
+- **`AuditEvent.trace_id` populated at emit** — plumbed through
+  `AuditEventEmitter` once the FastAPI middleware calls it; needs W07's
+  audit emitter to grab `get_current_trace_and_span_ids()` at
+  `emit_*` time. W07 reserved the field; W08 provides the helper; W11
+  wires it.
+- **Dashboards** — App Insights workbook JSON + Grafana JSON —
+  F10.4 acceptance artefact, arrives with W11 alongside real traffic.
+- **Static-analysis PHI gate** — a `ruff`/custom-lint rule that flags
+  any literal string matching a forbidden attribute name inside a
+  `set_attribute` / `record_exception` call. Runtime `safe_set_attribute`
+  is the current guard; the static rule is a W10 CI task.
+
+### 11. Sign-off
+
+- [ ] PE — telemetry review (span taxonomy, metric names, resource attrs)
+- [ ] SA — protocol seam review (`MetricEmitter`, `TelemetryProvider`, provenance-provider callable)
+- [ ] BE1 — implementation reviewer (wiring at repository / llm / specialist seams)
+- [ ] SEC — PHI-safety review (forbidden set completeness, safe_set_attribute enforcement)
+- [ ] QA — test coverage sign-off
 
 ---
 
@@ -2149,3 +2425,4 @@ Filled in when the workstream starts.
 | 2026-07-09 | W05 (Specialist Agents) implementation complete. `SpecialistBase` template + 5 concrete specialists with domain-specific derived fields + family-history privacy strip; 14 `@tool` shims; MAF-backed `SpecialistLlm` bridge; `SpecialistExecutor` replaces W04 placeholder; `SpecialistRegistry` wired via DI. Latent W01 `OpenAIChatClient(model_id=)` typo fixed on the way through. 24 new unit tests; 236 total passing. | Delivery Lead |
 | 2026-07-10 | W06 (Parallel Execution & Mode-Parity) implementation complete. Business-behaviour parity harness + deterministic `SpecialistRegistry` fixture + `parity_diff.deep_diff` helper; `mode_parity` pytest marker; `dispatch_mode_summary()` helper on `Settings`; `orch.mode` + `orch.width` on dispatch log events; `docs/config/orchestration.md` + `docs/runbooks/enable-parallel-dispatch.md` published. Harness caught a real state-sharing bug in the deterministic fixture on the first draft — fixed by building a fresh registry per run. 19 new tests; 258 total passing. | Delivery Lead |
 | 2026-07-10 | W07 (Authentication & Authorization) implementation complete. Entra JWT authenticator (PyJWT + JWKS + audience/issuer/expiry + required-role) behind an :class:`Authenticator` protocol seam; :class:`StubAuthenticator` for dev/tests refuses to construct in prod; structured :class:`AuditEvent` model + `LoggingAuditSink` routed via `egp_maf.audit` logger; `AllowlistAuthzPolicy` emits `authz.granted` / `authz.denied` (backwards-compatible with W02); DI container exposes `authenticator` + `audit_emitter`; Bicep for Entra app registration + 3 app roles; `docs/security/entra.md` + `docs/security/allowlist.md`. 34 new tests; 292 total passing. | Delivery Lead |
+| 2026-07-16 | W08 (Observability) implementation complete. OTEL `TelemetryProvider` + `MeterProvider` behind a single `build_telemetry_provider(settings)` factory; :class:`SpanKind` StrEnum + 7 span context managers (`workflow_request`, `workflow_executor`, `specialist`, `tool`, `llm`, `repository`, `db`); :class:`MetricEmitter` protocol + `NullMetricEmitter` / `OtelMetricEmitter` with all 10 KPI metrics from Design §20.4; PHI-safe attribute allowlist + `FORBIDDEN_ATTRIBUTES` (family-history trio + LLM content + row body + tool result) enforced at every emit via `safe_set_attribute`; `ProvenanceService(otel_context_provider=...)` stamps `trace_id`/`span_id` from active span (non-throwing); Repository base, LLM bridge, SpecialistExecutor and DI container wired; `docs/observability/spans.md` + `docs/observability/metrics.md`. 38 new tests; 330 total passing. | Delivery Lead |

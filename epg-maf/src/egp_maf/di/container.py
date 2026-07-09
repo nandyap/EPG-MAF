@@ -21,6 +21,14 @@ from egp_maf.agents.registry import (
 from egp_maf.auth.audit import AuditEventEmitter, LoggingAuditSink
 from egp_maf.auth.authenticator import Authenticator, build_authenticator
 from egp_maf.config.settings import Settings, get_settings
+from egp_maf.telemetry import (
+    MetricEmitter,
+    NullMetricEmitter,
+    OtelMetricEmitter,
+    TelemetryProvider,
+    build_telemetry_provider,
+    get_current_trace_and_span_ids,
+)
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
 from egp_maf.infrastructure.db_pool import DbPoolFactory
@@ -77,6 +85,8 @@ class Container:
         authz_policy: AuthzPolicy,
         audit_emitter: AuditEventEmitter,
         authenticator: Authenticator,
+        telemetry_provider: TelemetryProvider,
+        metric_emitter: MetricEmitter,
         specialist_registry: SpecialistRegistry,
         workflow_runtime: WorkflowRuntime,
     ) -> None:
@@ -90,6 +100,8 @@ class Container:
         self.authz_policy = authz_policy
         self.audit_emitter = audit_emitter
         self.authenticator = authenticator
+        self.telemetry_provider = telemetry_provider
+        self.metric_emitter = metric_emitter
         self.specialist_registry = specialist_registry
         self.workflow_runtime = workflow_runtime
 
@@ -183,7 +195,24 @@ def build_container(
     llm_client_factory = LlmClientFactory(resolved_settings)
     prompt_service = PromptService(resolved_settings)
     thread_state_provider = ThreadStateProvider(cosmos_client_factory, resolved_settings)
-    provenance_service = ProvenanceService()
+
+    # W08: Telemetry bootstraps early so every downstream constructor
+    # that wants a tracer/meter gets a live one. The provider is not
+    # installed as the OTEL global yet; ``install_globally`` runs on
+    # startup so unit tests can build their own without polluting the
+    # process-wide state.
+    telemetry_provider = build_telemetry_provider(resolved_settings)
+    metric_emitter: MetricEmitter = OtelMetricEmitter(
+        telemetry_provider.meter_provider.get_meter("egp_maf")
+    )
+
+    # W08: :class:`ProvenanceService` now populates ``trace_id`` /
+    # ``span_id`` on every :class:`DBProvenance` when a span is active
+    # (Design §20.6). The context provider is non-throwing and safe to
+    # call from any thread.
+    provenance_service = ProvenanceService(
+        otel_context_provider=get_current_trace_and_span_ids,
+    )
 
     allowlist_path = (
         Path(resolved_settings.authz_allowlist_path)
@@ -276,6 +305,8 @@ def build_container(
         authz_policy=authz_policy,
         audit_emitter=audit_emitter,
         authenticator=authenticator,
+        telemetry_provider=telemetry_provider,
+        metric_emitter=metric_emitter,
         specialist_registry=specialist_registry,
         workflow_runtime=workflow_runtime,
     )

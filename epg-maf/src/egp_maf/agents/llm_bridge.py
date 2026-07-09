@@ -35,6 +35,7 @@ from egp_maf.agents.base import (
     SpecialistReactResult,
     ToolCall,
 )
+from egp_maf.telemetry import llm_span
 
 _logger = logging.getLogger(__name__)
 
@@ -72,10 +73,13 @@ class MafSpecialistLlm(SpecialistLlm):
             instructions=request.system_prompt,
             tools=request.tools,
         )
-        response = await agent.run(
-            [_text_msg("user", request.user_message)],
-            options=ChatOptions(temperature=self._temperature),
-        )
+        # W08: one span per LLM call. ``model`` name comes from the
+        # ``agent_id`` (which encodes the specialist name in this bridge).
+        with llm_span(model=self._agent_id, phase="react"):
+            response = await agent.run(
+                [_text_msg("user", request.user_message)],
+                options=ChatOptions(temperature=self._temperature),
+            )
         tool_calls = _extract_tool_calls_from_response(response)
         transcript = _flatten_transcript(response)
         return SpecialistReactResult(transcript=transcript, tool_calls=tool_calls)
@@ -89,13 +93,16 @@ class MafSpecialistLlm(SpecialistLlm):
         ]
         messages.append(_text_msg("user", request.extraction_instruction))
 
-        response = await self._client.get_response(
-            messages,
-            options=ChatOptions(
-                temperature=self._temperature,
-                response_format=request.response_schema,
-            ),
-        )
+        with llm_span(
+            model=self._agent_id, phase="extract", structured_output=True
+        ):
+            response = await self._client.get_response(
+                messages,
+                options=ChatOptions(
+                    temperature=self._temperature,
+                    response_format=request.response_schema,
+                ),
+            )
 
         # Structured Outputs — MAF populates response.value with the
         # parsed model instance when ``response_format`` is a BaseModel.

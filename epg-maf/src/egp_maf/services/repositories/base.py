@@ -21,6 +21,7 @@ Repository, which is where clinical reasoning naturally sits.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -30,6 +31,7 @@ from egp_maf.services.authz import AuthzPolicy
 from egp_maf.services.provenance import ProvenanceService
 from egp_maf.state.clinician_context import ClinicianContext
 from egp_maf.state.provenance import DBProvenance
+from egp_maf.telemetry import db_span, safe_set_attribute
 
 
 class BaseRepository:
@@ -64,25 +66,36 @@ class BaseRepository:
         """Run ``sql`` with ``params`` and return rows as dicts.
 
         Uses the pool's row factory to return ``dict[str, Any]`` — matches
-        the prototype's tool return shape (Discovery §5.1).
+        the prototype's tool return shape (Discovery §5.1). W08 wraps
+        the call in a ``db.query`` span; row count is attached on
+        success so dashboards can partition read latency by result
+        size.
         """
         pool = self._pool_factory.pool
-        try:
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(sql, list(params))
-                    columns = (
-                        [d.name for d in cur.description] if cur.description else []
-                    )
-                    rows = await cur.fetchall()
-                    return [dict(zip(columns, row, strict=True)) for row in rows]
-        except Exception as exc:
-            # Wrap any driver error as DatabaseUnavailable so callers can
-            # react with a stable HTTP status. Preserve the original exception
-            # via ``__cause__``.
-            raise DatabaseUnavailable(
-                f"Query failed: {exc.__class__.__name__}"
-            ) from exc
+        table = _infer_table(sql)
+        with db_span(table=table, operation="SELECT") as _span:
+            try:
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(sql, list(params))
+                        columns = (
+                            [d.name for d in cur.description]
+                            if cur.description
+                            else []
+                        )
+                        rows = await cur.fetchall()
+                        dict_rows = [
+                            dict(zip(columns, row, strict=True)) for row in rows
+                        ]
+                        safe_set_attribute(_span, "db.row_count", len(dict_rows))
+                        return dict_rows
+            except Exception as exc:
+                # Wrap any driver error as DatabaseUnavailable so callers can
+                # react with a stable HTTP status. Preserve the original exception
+                # via ``__cause__``. Span records the exception via db_span.
+                raise DatabaseUnavailable(
+                    f"Query failed: {exc.__class__.__name__}"
+                ) from exc
 
     # ── Provenance ──────────────────────────────────────────────────
     def _build_provenance(
@@ -102,3 +115,20 @@ class BaseRepository:
             source_row=source_row,
             fields_derived=fields_derived,
         )
+
+
+# ── W08: SQL → table-name heuristic for the ``db.query`` span ────────
+
+_FROM_TABLE_RE = re.compile(r"\bFROM\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
+
+
+def _infer_table(sql: str) -> str:
+    """Best-effort extraction of the primary table name from a SQL
+    ``SELECT`` for use as a low-cardinality span attribute.
+
+    Returns ``"unknown"`` when the heuristic can't find a table (which
+    happens for CTE-heavy statements — we don't need parser-perfect
+    coverage for a telemetry label).
+    """
+    match = _FROM_TABLE_RE.search(sql)
+    return match.group(1).lower() if match else "unknown"
