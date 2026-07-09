@@ -68,3 +68,26 @@ class ConcurrencyConflict(EgpError):
 
     error_code = "concurrency_conflict"
     http_status = 409
+
+
+class RoutingBudgetExceeded(EgpError):
+    """Raised when the orchestration router exhausts its iteration budget
+    without producing an ``end`` decision. Design ADR-009 caps this at
+    ``2 * n_specialists + 2 = 12`` in Phase 1.
+
+    The workflow surfaces this as a graceful degradation — whatever
+    specialists have completed are still returned; only the router loop stops.
+    """
+
+    error_code = "routing_budget_exceeded"
+    http_status = 500
+
+
+class SpecialistFailed(EgpError):
+    """Raised when a specialist sub-executor fails. The orchestration
+    sub-workflow catches this and returns a partial result rather than
+    aborting the whole run (Design ADR-007).
+    """
+
+    error_code = "specialist_failed"
+    http_status = 500

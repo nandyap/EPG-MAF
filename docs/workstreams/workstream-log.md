@@ -43,7 +43,7 @@ Every workstream section carries the same subsections in the same order:
 | W01 | [Foundation](#workstream-w01--foundation-) | ✅ Complete | 1 | Delivery Lead | 25 / 15 | ~2,370 | — |
 | W02 | [Clinical Data Layer](#workstream-w02--clinical-data-layer-) | ✅ Complete | 2 | DE + BE2 | 14 / 7 | ~1,650 | W01 |
 | W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ✅ Complete | 2–3 | BE2 | 11 / 7 | ~2,520 | W01, W02 |
-| W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ⏳ Not started | 4 | BE1 | — | — | W01, W03 |
+| W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ✅ Complete | 4 | BE1 | 15 / 7 | ~1,880 | W01, W03 |
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ⏳ Not started | 4–5 | BE2 | — | — | W03, W04 |
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ⏳ Not started | 5 | BE1 + QA | — | — | W04, W05 |
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ⏳ Not started | 6 | BE2 + SEC | — | — | W01, W03 |
@@ -75,7 +75,8 @@ flowchart LR
     class W01 done
     class W02 done
     class W03 done
-    class W04,W05,W06,W07,W08,W09,W10,W11 pending
+    class W04 done
+    class W05,W06,W07,W08,W09,W10,W11 pending
 ```
 
 ---
@@ -968,32 +969,286 @@ is not applicable — those don't exist yet.
 
 ---
 
-## Workstream W04 — MAF Workflow Skeleton ⏳
+## Workstream W04 — MAF Workflow Skeleton ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 4
-**Owner:** BE1
+**Owner:** BE1 (implementation), SA (workflow-shape review)
+**PR gate reviewers:** SA · BE1
+**Files:** 15 source + 7 test in `epg-maf/`; DI container + errors module updated
+**LOC:** ~1,880 Python (source ~1,210 · tests ~670)
 **Depends on:** W01, W03
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Build the workflow scaffolding — chat + orchestration sub-workflow, `SpecialistDispatchSet` decision type, fan-out/fan-in edges (built from day one but running with size 1 until W06). Specialists remain unimplemented at the end of this workstream — placeholders only.
+Stand up the MAF `WorkflowBuilder` topology that the specialists (W05)
+and parallel dispatch (W06) will slot into: chat workflow + orchestration
+sub-workflow, fan-out/fan-in edges wired for width ≤10, iteration-budget
+safeguard, provenance-stripped synthesis. Specialists are placeholders
+that return a canned payload — real `ChatAgent`-backed implementations
+land in W05 without touching this scaffolding.
 
 **In scope:**
 
-- MAF `WorkflowRuntime` bootstrap + shared-state Pydantic models.
-- `chat_router` and `synthesize_response` executors.
-- Sub-workflow composition with event forwarding (Design ADR-007).
-- `orch_router` emitting `SpecialistDispatchSet(specialists, mode, requested_diseases)`.
-- Fan-out/fan-in edges — dormant with `|set|=1`.
-- Reducers: `agents_completed` list-append with `Remove` sentinel; overwrite reducers for domain slots.
-- Iteration budget = `2 × 5 + 2 = 12` with typed `RoutingBudgetExceeded`.
+- Shared-state Pydantic models mirroring the prototype's `ChatAgentState`
+  and `OrchestrationAgentState` field-for-field, plus `ClinicianContext`
+  (ADR-008) and set-append reducer with `Remove` sentinel on
+  `agents_completed` (ADR-009).
+- Router decision types: `ChatRouterDecision` (same shape as prototype)
+  and `SpecialistDispatchSet` (set from day 1 per ADR-013).
+- Two typed errors: `RoutingBudgetExceeded`, `SpecialistFailed`.
+- 3 chat executors (`chat_router`, `run_orchestration`,
+  `synthesize_response`) + 5-specialist orchestration sub-workflow with
+  dispatcher + joiner.
+- Fan-out/fan-in edges wired to all 5 stubs — dormant at |set|=1 in
+  Phase 1 (Design ADR-013); dispatch mode + max fanout width sanitised
+  in `orch_router` before dispatch.
+- Iteration budget = `ORCH_ITERATION_BUDGET` (default 12) enforced with
+  `RoutingBudgetExceeded`; sub-workflow failures degrade gracefully via
+  `SpecialistFailed`.
+- `WorkflowRuntime` facade + DI container wiring.
+- 49 unit tests covering state/decisions/every executor + fan-in join +
+  end-to-end runs (chat-only, sequential-1, sequential-2, parallel-2,
+  budget-exceeded degradation).
 
-**Out of scope:** specialist agents (W05), auth (W07), observability (W08).
+**Out of scope (→ W05):**
 
-### Sections 2–11
+- Real `ChatAgent`-backed router LLMs (the seam is the `RouterLlm` and
+  `OrchRouterLlm` protocols; W04 supplies deterministic stubs).
+- Real specialists — W04 ships `SpecialistPlaceholderExecutor` that
+  reports a canned payload; W05 replaces each with the real ReAct +
+  structured-extraction pipeline.
+- Streaming events forwarded to an outer UI (→ W08).
+- Auth on the workflow entrypoint (→ W07).
 
-Filled in when the workstream starts.
+### 2. Mapping to the LangGraph prototype
+
+| Prototype file / concept | New home | Change |
+|---|---|---|
+| `agents/chat/graph/graph.py::chat_router_node` | [`chat/chat_router.py`](../../epg-maf/src/egp_maf/workflow/chat/chat_router.py) | MAF `Executor`; LLM behind `RouterLlm` protocol |
+| `agents/chat/graph/graph.py::run_main_agent_node` | [`chat/run_orchestration.py`](../../epg-maf/src/egp_maf/workflow/chat/run_orchestration.py) | ADR-007: uses a MAF sub-workflow instead of plain `.invoke()` |
+| `agents/chat/graph/graph.py::synthesize_response_node` | [`chat/synthesize_response.py`](../../epg-maf/src/egp_maf/workflow/chat/synthesize_response.py) | `strip_provenance` preserved verbatim; synthesis LLM behind `SynthesisLlm` protocol |
+| `agents/main/graph/graph.py::router_node` | [`orchestration/orch_router.py`](../../epg-maf/src/egp_maf/workflow/orchestration/orch_router.py) | Decision type is `SpecialistDispatchSet` (ADR-013); adds budget + mode/width sanitisation |
+| `agents/main/graph/graph.py` specialist nodes (5) | [`orchestration/specialist_stub.py`](../../epg-maf/src/egp_maf/workflow/orchestration/specialist_stub.py) | Placeholder in W04 — replaced by real `ChatAgent` executors in W05 |
+| `agents/chat/state/state.py::ChatAgentState` | [`state.py::ChatWorkflowState`](../../epg-maf/src/egp_maf/workflow/state.py) | Adds required `ctx: ClinicianContext` (ADR-008); typed `SpecialistSlot` for slot value |
+| `agents/main/state/state.py::OrchestrationAgentState` | [`state.py::OrchestrationWorkflowState`](../../epg-maf/src/egp_maf/workflow/state.py) | Adds `router_iterations` counter for the budget |
+| — (new) | [`state.py::apply_agents_completed`](../../epg-maf/src/egp_maf/workflow/state.py) | ADR-009 set-append reducer + `Remove` sentinel |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+| MAF primitive | Used for |
+|---|---|
+| `WorkflowBuilder(start_executor=..., output_from=[...])` | Both chat and orchestration workflows |
+| `Executor` + `@handler` decorator | Every node in both workflows |
+| `WorkflowContext.send_message` / `yield_output` | Edge messaging (chat_router → next) and workflow output (synthesizer/orch_router terminal) |
+| `add_edge` with `condition=` | Chat router's binary route (bypassing the buggy `SwitchCaseEdgeGroup` in agent-framework 1.10.0 — see follow-up below) |
+| `add_fan_out_edges(dispatcher, stubs)` | Fan-out from dispatcher to the 5 specialist stubs |
+| `add_fan_in_edges(stubs, joiner)` | Deterministic join back to `orch_router` |
+| `Workflow.run(state)` | Sub-workflow invocation inside `RunOrchestrationExecutor` |
+
+Installed version: `agent-framework 1.10.0`. `LlmClientFactory` from
+W01 stays untouched — W04 doesn't yet build `ChatAgent`s; that's W05.
+
+### 4. Files created
+
+<details>
+<summary>Source (15 files)</summary>
+
+```
+epg-maf/src/egp_maf/workflow/__init__.py                        (re-exports)
+epg-maf/src/egp_maf/workflow/state.py                           (state models + reducers + Remove sentinel)
+epg-maf/src/egp_maf/workflow/decisions.py                       (ChatRouterDecision, SpecialistDispatchSet)
+epg-maf/src/egp_maf/workflow/router_llm.py                      (RouterLlm/OrchRouterLlm protocols + stubs)
+epg-maf/src/egp_maf/workflow/runtime.py                         (WorkflowRuntime facade)
+epg-maf/src/egp_maf/workflow/chat/__init__.py
+epg-maf/src/egp_maf/workflow/chat/chat_router.py                (ChatRouterExecutor)
+epg-maf/src/egp_maf/workflow/chat/run_orchestration.py          (RunOrchestrationExecutor — sub-workflow invoker)
+epg-maf/src/egp_maf/workflow/chat/synthesize_response.py        (SynthesizeResponseExecutor + strip_provenance + StubSynthesisLlm)
+epg-maf/src/egp_maf/workflow/chat/build.py                      (build_chat_workflow)
+epg-maf/src/egp_maf/workflow/orchestration/__init__.py
+epg-maf/src/egp_maf/workflow/orchestration/orch_router.py       (OrchRouterExecutor — dispatch/terminate/budget)
+epg-maf/src/egp_maf/workflow/orchestration/specialist_stub.py   (SpecialistPlaceholderExecutor)
+epg-maf/src/egp_maf/workflow/orchestration/dispatcher.py        (SpecialistDispatcherExecutor + SpecialistJoinerExecutor)
+epg-maf/src/egp_maf/workflow/orchestration/build.py             (build_orchestration_workflow)
+```
+</details>
+
+<details>
+<summary>Tests (7 files, 49 test cases)</summary>
+
+```
+epg-maf/tests/unit/workflow/__init__.py
+epg-maf/tests/unit/workflow/test_state.py               (~11 tests — reducers, SpecialistSlot, state factories)
+epg-maf/tests/unit/workflow/test_decisions.py           (~7 tests — ChatRouterDecision + SpecialistDispatchSet)
+epg-maf/tests/unit/workflow/test_chat_router.py         (~4 tests — route paths + reset_agents cascade)
+epg-maf/tests/unit/workflow/test_synthesize_response.py (~7 tests — strip_provenance edge cases + executor output)
+epg-maf/tests/unit/workflow/test_orch_router.py         (~6 tests — dispatch/terminate/budget/mode/width)
+epg-maf/tests/unit/workflow/test_specialists.py         (~6 tests — stub + dispatcher + joiner)
+epg-maf/tests/unit/workflow/test_end_to_end.py          (~5 tests — real WorkflowBuilder end-to-end runs)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/errors.py` | Added `RoutingBudgetExceeded` (500) and `SpecialistFailed` (500). |
+| `epg-maf/src/egp_maf/di/container.py` | `Container` gains `workflow_runtime: WorkflowRuntime`; `build_container` constructs it with stub router LLMs (real ones plug in during W05). |
+| `epg-maf/tests/unit/test_di_container.py` | Test factory updated for the new required `workflow_runtime` arg; DI test asserts a runtime is present with both workflows built. |
+| `epg-maf/tests/unit/test_errors.py` | Coverage extended to the two new errors. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**Two workflows, one runtime.** The orchestration is a real MAF sub-workflow
+(ADR-007). `RunOrchestrationExecutor.handle_state` calls
+`orchestration_workflow.run(inner_state)` and merges the returned final
+`OrchestrationWorkflowState` back onto the outer `ChatWorkflowState`. This
+is the boundary the streaming/event-forwarding work in W08 will hook into.
+
+**Fan-out is real, dormant by default.** The orchestration sub-workflow
+assembly has a genuine `add_fan_out_edges(dispatcher, [5 stubs])` +
+`add_fan_in_edges([5 stubs], joiner)` topology. In Phase 1 the router
+only ever emits `|specialists| ≤ 1`; the four specialists that aren't
+named simply pass the state through so the fan-in barrier completes. In
+Phase 3 (W06), a config flag flip enables larger sets — no code change.
+
+**Sanitisation lives on the wire, not in the LLM.** `orch_router`
+downgrades any parallel decision to a single-element set when
+`ORCH_DISPATCH_MODE=sequential`, and caps at `ORCH_MAX_FANOUT_WIDTH`
+otherwise. The LLM prompt still says "emit one" in Phase 1, but the
+executor enforces the invariant regardless of what the model returns.
+
+**Budget as a first-class safety property.** `orch_router` checks
+`state.router_iterations >= settings.orch_iteration_budget` **before**
+spending another LLM call. Breach raises `RoutingBudgetExceeded`, which
+`RunOrchestrationExecutor` catches and translates into graceful
+degradation — the outer state is forwarded to synthesis unchanged, and
+the user still gets an answer (albeit possibly missing some domains).
+
+**Provenance never touches the synthesis prompt.** `strip_provenance`
+is a recursive dict/list stripper (verbatim port of the prototype's
+function). `SynthesizeResponseExecutor` runs it over every specialist
+slot's `output` before serialising to the LLM prompt. Provenance still
+lives on the state — it just doesn't cross the LLM boundary.
+
+**Router LLM behind a protocol.** `RouterLlm` and `OrchRouterLlm` are
+narrow Python protocols with a single `async` method each. W04 ships
+deterministic stubs and uses them in the DI container by default; W05
+replaces them with real `ChatAgent`-backed structured-output routers.
+No executor code changes in W05.
+
+**Framework bug worked around.** MAF 1.10.0's
+`add_switch_case_edge_group` has an attribute typo
+(`case.target` vs `case.target_id`) that crashes at build time. We use
+two `add_edge(source, target, condition=...)` calls with mutually-exclusive
+conditions — semantically identical and works today. When the upstream
+is fixed, one line change reverts to switch-case.
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| State + reducers | `tests/unit/workflow/test_state.py` | ~11 | unit |
+| Decision types | `tests/unit/workflow/test_decisions.py` | ~7 | unit |
+| Chat router | `tests/unit/workflow/test_chat_router.py` | ~4 | unit |
+| Synthesizer + strip | `tests/unit/workflow/test_synthesize_response.py` | ~7 | unit |
+| Orch router (dispatch/budget/mode) | `tests/unit/workflow/test_orch_router.py` | ~6 | unit |
+| Specialist stub + dispatcher + joiner | `tests/unit/workflow/test_specialists.py` | ~6 | unit |
+| End-to-end with real WorkflowBuilder | `tests/unit/workflow/test_end_to_end.py` | ~5 | unit |
+| Errors (extended) | `tests/unit/test_errors.py` | +2 | unit |
+| DI wiring | `tests/unit/test_di_container.py` | +1 | unit |
+| **W04 subtotal** | | **~49** | |
+| **Programme total (W01–W04)** | | **212 passing** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+.\.venv\Scripts\python.exe -m pytest -m "not integration and not parity" -q
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+End-to-end shape is validated in `test_end_to_end.py` — the exact
+chat_router → orch_router → fan-out → fan-in → orch_router (terminal)
+→ synthesize sequence of the prototype (with `main_graph.invoke(...)`
+replaced by a real MAF sub-workflow per ADR-007). Byte-level output
+parity vs. the prototype cannot be checked yet because the specialist
+stubs return canned payloads — that parity check lands in W05 (per
+Design §28 "Shadow tests").
+
+### 9. Validation Checklist (paste into PR)
+
+**State + reducers**
+
+- [ ] `pytest tests/unit/workflow/test_state.py -v` — all green.
+- [ ] `apply_agents_completed` dedupes, sorts, drops via `Remove`, rejects unknown names.
+- [ ] `SpecialistSlot.completed_with` and `failed_with` produce the documented shapes.
+- [ ] `ChatWorkflowState` requires only `ctx`, `patient_id`, `thread_id`.
+
+**Decisions**
+
+- [ ] `pytest tests/unit/workflow/test_decisions.py -v` — all green.
+- [ ] `SpecialistDispatchSet(specialists=[]).is_terminal()` is True.
+- [ ] Duplicate specialists rejected.
+- [ ] Unknown specialist names rejected (via `Literal`).
+
+**Chat router**
+
+- [ ] `pytest tests/unit/workflow/test_chat_router.py -v` — all green.
+- [ ] `reset_agents=[prs]` nulls the slot **and** drops the name from `agents_completed`; other slots untouched.
+- [ ] Latest `user` message pulled into `original_query`.
+
+**Synthesizer**
+
+- [ ] `pytest tests/unit/workflow/test_synthesize_response.py -v` — all green.
+- [ ] `strip_provenance` removes `provenance` at every nesting depth.
+- [ ] Clinical-context string presented to the synthesis LLM never contains the substring `provenance`.
+
+**Orch router**
+
+- [ ] `pytest tests/unit/workflow/test_orch_router.py -v` — all green.
+- [ ] Empty `SpecialistDispatchSet` yields the current state — does not send to the dispatcher.
+- [ ] Non-empty decision increments `router_iterations`.
+- [ ] `ORCH_DISPATCH_MODE=sequential` downgrades any multi-element decision to the first specialist only.
+- [ ] `router_iterations >= ORCH_ITERATION_BUDGET` raises `RoutingBudgetExceeded`.
+
+**Fan-out**
+
+- [ ] `pytest tests/unit/workflow/test_specialists.py -v` — all green.
+- [ ] Every specialist stub not named in the decision passes state through unchanged.
+- [ ] Joiner merges `agents_completed` deterministically regardless of branch order.
+
+**End-to-end**
+
+- [ ] `pytest tests/unit/workflow/test_end_to_end.py -v` — all green.
+- [ ] Sequential 1-specialist path completes in a single orchestration iteration.
+- [ ] Sequential 2-specialist path completes both across two iterations.
+- [ ] Parallel width-2 (opt-in) completes both in one iteration.
+- [ ] Budget breach doesn't crash the workflow — synth still produces the assistant reply.
+
+**Repository hygiene**
+
+- [ ] `git status --porcelain agents/ config/ test_data/ tests/` is empty (prototype untouched).
+- [ ] No MAF-only symbols leak into `state/`, `services/`, or `errors.py` (`grep -R 'agent_framework' src/egp_maf/{state,services,errors.py}` returns nothing).
+
+### 10. Known follow-ups (out of scope for W04)
+
+- **Real `ChatAgent`-backed routers** (→ W05) plug into the two protocol seams.
+- **Real specialists** (→ W05) replace `SpecialistPlaceholderExecutor`.
+- **Event forwarding to outer stream** (→ W08) — W04 logs one structured event per sub-workflow run; W08 wires the stream properly.
+- **MAF switch-case edge group** currently has an internal attribute-name bug (`case.target` vs `case.target_id`) in agent-framework 1.10.0 — we use two conditional edges instead; revisit once upstream patches.
+- **Checkpointer wiring** — `WorkflowBuilder` accepts a `CheckpointStorage`; the Cosmos-backed adapter lands with W07's session-persistence work.
+
+### 11. Sign-off
+
+- [ ] SA — workflow-shape review
+- [ ] BE1 — implementation reviewer
+- [ ] QA — test coverage sign-off
 
 ---
 
@@ -1185,3 +1440,4 @@ Filled in when the workstream starts.
 | 2026-07-09 | W02 cleanup: removed unused `IRepository` protocol; moved `OpenAuthzPolicy` / `ClosedAuthzPolicy` from `src/egp_maf/services/authz.py` to `tests/support/authz_doubles.py`. No behavioural change. Docs updated where they described removed classes. | Delivery Lead |
 | 2026-07-09 | W03 (Domain Repositories) implementation complete. 5 repositories + typed result models + deterministic JSON parser + family-history privacy strip. Section filled in; dashboard + diagram updated. | Delivery Lead |
 | 2026-07-09 | W03 pre-push: drive-by fixes to keep pytest fully green — repaired PEP 3110 scoping bug in `tests/unit/test_errors.py::test_error_chain` and silenced two Pydantic 2.11 `model_fields`-on-instance deprecation warnings in the two W03 family-history tests. Behaviour unchanged. | Delivery Lead |
+| 2026-07-09 | W04 (MAF Workflow Skeleton) implementation complete. Chat + orchestration sub-workflow on `agent-framework 1.10.0`; state models with set-append reducer; router decision types; fan-out plumbing dormant at width 1; iteration budget with typed `RoutingBudgetExceeded`. 49 new unit tests; 212 total passing. | Delivery Lead |

@@ -9,7 +9,9 @@ from egp_maf.errors import (
     DatabaseUnavailable,
     EgpError,
     PromptNotFound,
+    RoutingBudgetExceeded,
     SchemaEvolutionError,
+    SpecialistFailed,
 )
 
 
@@ -22,6 +24,8 @@ class TestErrorTaxonomy:
             CosmosUnavailable: ("cosmos_unavailable", 503),
             SchemaEvolutionError: ("schema_evolution_error", 500),
             ConcurrencyConflict: ("concurrency_conflict", 409),
+            RoutingBudgetExceeded: ("routing_budget_exceeded", 500),
+            SpecialistFailed: ("specialist_failed", 500),
         }
         for cls, (code, status) in matrix.items():
             instance = cls("message")

@@ -66,6 +66,23 @@ def _build_test_container(settings: Settings) -> tuple[
     prompt = _FakePromptService()
     thread_state = ThreadStateProvider(cosmos, settings)  # type: ignore[arg-type]
 
+    # W04: a WorkflowRuntime is now part of the Container. We construct one
+    # with the same stub router LLMs the production build_container uses in
+    # the absence of a real Compass-backed router.
+    from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
+    from egp_maf.workflow.router_llm import StubOrchRouterLlm, StubRouterLlm
+    from egp_maf.workflow.runtime import WorkflowRuntime
+
+    workflow_runtime = WorkflowRuntime(
+        settings=settings,
+        chat_router_llm=StubRouterLlm(
+            ChatRouterDecision(needs_clinical_data=False, reason="test stub")
+        ),
+        orch_router_llm=StubOrchRouterLlm(
+            [SpecialistDispatchSet(specialists=[], reason="test stub")]
+        ),
+    )
+
     container = Container(
         settings=settings,
         db_pool_factory=db,  # type: ignore[arg-type]
@@ -75,6 +92,7 @@ def _build_test_container(settings: Settings) -> tuple[
         thread_state_provider=thread_state,
         provenance_service=ProvenanceService(),
         authz_policy=OpenAuthzPolicy(),
+        workflow_runtime=workflow_runtime,
     )
     return container, db, cosmos, prompt
 
@@ -145,3 +163,9 @@ class TestBuildContainerWiring:
         # Default settings have no allowlist path → AllowlistAuthzPolicy with
         # None inside.
         assert isinstance(container.authz_policy, AllowlistAuthzPolicy)
+        # W04 addition — the workflow runtime is wired.
+        from egp_maf.workflow.runtime import WorkflowRuntime
+
+        assert isinstance(container.workflow_runtime, WorkflowRuntime)
+        assert container.workflow_runtime.chat_workflow is not None
+        assert container.workflow_runtime.orchestration_workflow is not None

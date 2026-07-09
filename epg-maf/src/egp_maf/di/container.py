@@ -23,6 +23,14 @@ from egp_maf.services.authz import AllowlistAuthzPolicy, AuthzPolicy
 from egp_maf.services.prompt_service import PromptService
 from egp_maf.services.provenance import ProvenanceService
 from egp_maf.services.thread_state import ThreadStateProvider
+from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
+from egp_maf.workflow.router_llm import (
+    OrchRouterLlm,
+    RouterLlm,
+    StubOrchRouterLlm,
+    StubRouterLlm,
+)
+from egp_maf.workflow.runtime import WorkflowRuntime
 
 _logger = get_logger(__name__)
 
@@ -54,6 +62,7 @@ class Container:
         thread_state_provider: ThreadStateProvider,
         provenance_service: ProvenanceService,
         authz_policy: AuthzPolicy,
+        workflow_runtime: WorkflowRuntime,
     ) -> None:
         self.settings = settings
         self.db_pool_factory = db_pool_factory
@@ -63,6 +72,7 @@ class Container:
         self.thread_state_provider = thread_state_provider
         self.provenance_service = provenance_service
         self.authz_policy = authz_policy
+        self.workflow_runtime = workflow_runtime
 
         self._started: bool = False
 
@@ -128,10 +138,23 @@ class Container:
         return self._started
 
 
-def build_container(settings: Settings | None = None) -> Container:
+def build_container(
+    settings: Settings | None = None,
+    *,
+    chat_router_llm: RouterLlm | None = None,
+    orch_router_llm: OrchRouterLlm | None = None,
+) -> Container:
     """Wire the application container.
 
     Bindings are declared here — one place to trace every dependency.
+
+    The two router-LLM keyword arguments are the seam for W05: the caller
+    (production main / tests) passes real Compass-backed implementations.
+    When omitted, the container is wired with harmless stubs so that
+    integration tests (and W04 smoke runs) can exercise the workflow
+    without an LLM. The stubs emit a single ``end`` decision, which
+    means the orchestration loop exits immediately without any specialist
+    dispatch — useful as a health check, not as a workflow simulation.
     """
     resolved_settings = settings or get_settings()
     configure_logging(resolved_settings)
@@ -150,6 +173,23 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     authz_policy: AuthzPolicy = AllowlistAuthzPolicy(allowlist_path)
 
+    # Router LLMs — defaults are safe stubs; W05 replaces with real ones.
+    resolved_chat_router: RouterLlm = chat_router_llm or StubRouterLlm(
+        ChatRouterDecision(
+            needs_clinical_data=False,
+            reason="default stub — no clinical data needed",
+            reset_agents=[],
+        )
+    )
+    resolved_orch_router: OrchRouterLlm = orch_router_llm or StubOrchRouterLlm(
+        [SpecialistDispatchSet(specialists=[], reason="default stub — immediate end")]
+    )
+    workflow_runtime = WorkflowRuntime(
+        settings=resolved_settings,
+        chat_router_llm=resolved_chat_router,
+        orch_router_llm=resolved_orch_router,
+    )
+
     return Container(
         settings=resolved_settings,
         db_pool_factory=db_pool_factory,
@@ -159,4 +199,5 @@ def build_container(settings: Settings | None = None) -> Container:
         thread_state_provider=thread_state_provider,
         provenance_service=provenance_service,
         authz_policy=authz_policy,
+        workflow_runtime=workflow_runtime,
     )
