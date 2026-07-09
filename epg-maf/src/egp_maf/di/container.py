@@ -18,6 +18,8 @@ from egp_maf.agents.registry import (
     SpecialistRegistry,
     build_specialist_registry,
 )
+from egp_maf.auth.audit import AuditEventEmitter, LoggingAuditSink
+from egp_maf.auth.authenticator import Authenticator, build_authenticator
 from egp_maf.config.settings import Settings, get_settings
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
@@ -73,6 +75,8 @@ class Container:
         thread_state_provider: ThreadStateProvider,
         provenance_service: ProvenanceService,
         authz_policy: AuthzPolicy,
+        audit_emitter: AuditEventEmitter,
+        authenticator: Authenticator,
         specialist_registry: SpecialistRegistry,
         workflow_runtime: WorkflowRuntime,
     ) -> None:
@@ -84,6 +88,8 @@ class Container:
         self.thread_state_provider = thread_state_provider
         self.provenance_service = provenance_service
         self.authz_policy = authz_policy
+        self.audit_emitter = audit_emitter
+        self.authenticator = authenticator
         self.specialist_registry = specialist_registry
         self.workflow_runtime = workflow_runtime
 
@@ -184,7 +190,20 @@ def build_container(
         if resolved_settings.authz_allowlist_path
         else None
     )
-    authz_policy: AuthzPolicy = AllowlistAuthzPolicy(allowlist_path)
+    # W07: shared audit emitter fans out authz.granted / authz.denied /
+    # auth.* events to the ``egp_maf.audit`` logger (routed to LAW in
+    # prod).
+    audit_emitter = AuditEventEmitter(sink=LoggingAuditSink())
+    authz_policy: AuthzPolicy = AllowlistAuthzPolicy(
+        allowlist_path, audit=audit_emitter
+    )
+
+    # W07: Authenticator maps a bearer token onto a ClinicianContext.
+    # ``build_authenticator`` picks the stub when EGP_AUTH_STUB_ENABLED is
+    # true (dev + tests) or the real Entra-backed one otherwise.
+    authenticator: Authenticator = build_authenticator(
+        resolved_settings, audit=audit_emitter
+    )
 
     # Router LLMs — defaults are safe stubs; production supplies real ones.
     resolved_chat_router: RouterLlm = chat_router_llm or StubRouterLlm(
@@ -255,6 +274,8 @@ def build_container(
         thread_state_provider=thread_state_provider,
         provenance_service=provenance_service,
         authz_policy=authz_policy,
+        audit_emitter=audit_emitter,
+        authenticator=authenticator,
         specialist_registry=specialist_registry,
         workflow_runtime=workflow_runtime,
     )

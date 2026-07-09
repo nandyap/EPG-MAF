@@ -21,6 +21,12 @@ a plain file (in dev). Structure:
 
 Admins bypass the per-patient check. The ``system`` clinician (created by
 ``ClinicianContext.system()``) also bypasses — used by background jobs.
+
+W07: :meth:`AllowlistAuthzPolicy.enforce_read` also emits a structured
+``authz.denied`` / ``authz.granted`` audit event via an optional
+:class:`~egp_maf.auth.audit.AuditEventEmitter`. Callers that don't
+supply one (existing W02 callers, unit tests) get a
+:class:`~egp_maf.auth.audit.NullAuditSink` and see no behaviour change.
 """
 
 from __future__ import annotations
@@ -28,10 +34,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from egp_maf.errors import AccessDenied, ConfigurationError
 from egp_maf.state.clinician_context import ClinicianContext
+
+if TYPE_CHECKING:  # pragma: no cover
+    from egp_maf.auth.audit import AuditEventEmitter
 
 _logger = logging.getLogger(__name__)
 
@@ -100,10 +109,24 @@ class AllowlistAuthzPolicy:
       than silently allowing.
     """
 
-    def __init__(self, allowlist_path: Path | None) -> None:
+    def __init__(
+        self,
+        allowlist_path: Path | None,
+        *,
+        audit: "AuditEventEmitter | None" = None,
+    ) -> None:
         self._path = allowlist_path
         self._allowlist: _Allowlist | None = None
         self._mtime: float | None = None
+        # W07: audit sink is optional. When None, we fall back to the
+        # log-only behaviour the W02 tests exercise. When provided (via
+        # the DI container in production), every denial + grant produces
+        # a structured audit event with a stable schema.
+        if audit is None:
+            from egp_maf.auth.audit import AuditEventEmitter, NullAuditSink
+
+            audit = AuditEventEmitter(sink=NullAuditSink())
+        self._audit = audit
         if allowlist_path is not None:
             # Eager load so a missing/invalid file fails startup.
             self._reload_if_stale()
@@ -164,7 +187,28 @@ class AllowlistAuthzPolicy:
                     "route": "repository.read",
                 },
             )
+            self._audit.emit_authz_denied(
+                clinician_id=ctx.clinician_id,
+                tenant_id=ctx.tenant_id,
+                patient_id=patient_id,
+                reason=(
+                    "clinician not on allowlist"
+                    if self._path is not None
+                    else "no allowlist configured (fail-closed)"
+                ),
+            )
             raise AccessDenied(
                 f"Clinician '{ctx.clinician_id}' is not authorised to read "
                 f"patient '{patient_id}'."
             )
+        # Granted path — audit event lets us prove access AFTER the fact
+        # (Design §21 audit retention). Not chatty on the console: the
+        # LoggingAuditSink writes to the dedicated ``egp_maf.audit``
+        # logger which is separately routed to the audit workspace in
+        # prod. NullAuditSink (default in W02-era construction) is a
+        # no-op.
+        self._audit.emit_authz_granted(
+            clinician_id=ctx.clinician_id,
+            tenant_id=ctx.tenant_id,
+            patient_id=patient_id,
+        )

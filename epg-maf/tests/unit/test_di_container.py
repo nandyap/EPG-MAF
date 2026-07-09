@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -16,6 +16,10 @@ from egp_maf.services.prompt_service import PromptService
 from tests.support.authz_doubles import OpenAuthzPolicy
 from egp_maf.services.provenance import ProvenanceService
 from egp_maf.services.thread_state import ThreadStateProvider
+
+if TYPE_CHECKING:  # pragma: no cover
+    from egp_maf.auth.audit import AuditEventEmitter
+    from egp_maf.auth.authenticator import Authenticator
 
 
 # ── Test doubles ─────────────────────────────────────────────────────
@@ -97,10 +101,27 @@ def _build_test_container(settings: Settings) -> tuple[
         thread_state_provider=thread_state,
         provenance_service=ProvenanceService(),
         authz_policy=OpenAuthzPolicy(),
+        audit_emitter=_audit_emitter(),
+        authenticator=_stub_authenticator(settings),
         specialist_registry=empty_registry,
         workflow_runtime=workflow_runtime,
     )
     return container, db, cosmos, prompt
+
+
+def _audit_emitter() -> "AuditEventEmitter":
+    from egp_maf.auth.audit import AuditEventEmitter, NullAuditSink
+
+    return AuditEventEmitter(sink=NullAuditSink())
+
+
+def _stub_authenticator(settings: Settings) -> "Authenticator":
+    # Enable stub authenticator for the test container regardless of
+    # ambient env — we're not exercising the real Entra path here.
+    from egp_maf.auth.authenticator import StubAuthenticator
+
+    stub_settings = settings.model_copy(update={"auth_stub_enabled": True})
+    return StubAuthenticator(settings=stub_settings)
 
 
 # ── Tests ────────────────────────────────────────────────────────────
@@ -157,9 +178,14 @@ class TestContainerLifecycle:
 
 class TestBuildContainerWiring:
     def test_build_container_returns_container(self, settings: Settings) -> None:
-        container = build_container(settings)
+        # W07: build_container attempts to construct an
+        # EntraTokenAuthenticator by default and requires ENTRA_* config;
+        # every W07-era test uses stub-mode settings so the container
+        # constructs without network / Entra config.
+        stub_settings = settings.model_copy(update={"auth_stub_enabled": True})
+        container = build_container(stub_settings)
         assert isinstance(container, Container)
-        assert container.settings is settings
+        assert container.settings is stub_settings
         assert isinstance(container.db_pool_factory, DbPoolFactory)
         assert isinstance(container.cosmos_client_factory, CosmosClientFactory)
         assert isinstance(container.llm_client_factory, LlmClientFactory)
@@ -183,3 +209,14 @@ class TestBuildContainerWiring:
         assert container.specialist_registry.names() == sorted(
             ["prs", "genomic_variants", "family_history", "pgx", "phenotype"]
         )
+
+        # W07 addition — the audit emitter + authenticator are wired.
+        from egp_maf.auth.audit import AuditEventEmitter
+        from egp_maf.auth.authenticator import (
+            Authenticator,
+            StubAuthenticator,
+        )
+
+        assert isinstance(container.audit_emitter, AuditEventEmitter)
+        assert isinstance(container.authenticator, Authenticator)
+        assert isinstance(container.authenticator, StubAuthenticator)

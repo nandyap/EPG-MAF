@@ -46,7 +46,7 @@ Every workstream section carries the same subsections in the same order:
 | W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ✅ Complete | 4 | BE1 | 15 / 7 | ~1,880 | W01, W03 |
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ✅ Complete | 4–5 | BE2 | 13 / 4 | ~2,860 | W03, W04 |
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ✅ Complete | 5 | BE1 + QA | 2 / 5 + 2 docs | ~770 | W04, W05 |
-| W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ⏳ Not started | 6 | BE2 + SEC | — | — | W01, W03 |
+| W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ✅ Complete | 6 | BE2 + SEC | 5 + 3 + 1 bicep + 2 docs | ~1,300 | W01, W03 |
 | W08 | [Observability](#workstream-w08--observability-) | ⏳ Not started | 6 | PE + BE1 | — | — | W01, W04, W05 |
 | W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ⏳ Not started | 6 | BE1 | — | — | W04, W05 |
 | W10 | [Testing, Evaluation & Load](#workstream-w10--testing-evaluation--load-) | ⏳ Not started | 7 | QA | — | — | W05, W08 |
@@ -78,7 +78,8 @@ flowchart LR
     class W04 done
     class W05 done
     class W06 done
-    class W07,W08,W09,W10,W11 pending
+    class W07 done
+    class W08,W09,W10,W11 pending
 ```
 
 ---
@@ -1760,28 +1761,276 @@ prototype output is a separate future workstream.
 
 ---
 
-## Workstream W07 — Authentication & Authorization ⏳
+## Workstream W07 — Authentication & Authorization ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 6
-**Owner:** BE2 + SEC
-**Depends on:** W01, W03
+**Owner:** BE2 (implementation), SEC (review), SA (design confirmation)
+**PR gate reviewers:** SEC · SA · BE2
+**Files:** 5 auth-module + 3 test + 1 Bicep + 2 security docs; DI container + `authz.py` + settings + di-test updated
+**LOC:** ~1,300 (source ~640 · tests ~510 · infra + docs ~215)
+**Depends on:** W01, W03 (both provided the seams; W07 supplies the tokens)
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Clinical-grade auth via Entra ID, `ClinicianContext` propagated through workflow state, `AuthzPolicy` enforced at Repository entry (last-mile RBAC — Design ADR-017).
+Make `ClinicianContext` come from a real Entra ID access token instead
+of the `ClinicianContext.system()` factory tests use, and produce a
+structured audit event on every authn/authz outcome. The authorisation
+half of Design ADR-017 was delivered in W02
+(:class:`AllowlistAuthzPolicy` at the Repository entry); W07 delivers
+the authentication half plus the audit contract.
 
 **In scope:**
 
-- Entra app registration + app roles (`Clinician`, `Auditor`, `Admin`).
-- FastAPI JWT middleware validating token claims.
-- `ClinicianContext` populated from token claims.
-- Patient-scope allowlist v1 (Key Vault JSON, hot-reload).
-- Structured `authz.denied` audit events.
+- :class:`ClinicianTokenClaims` typed subset of Entra ID access-token
+  claims + :func:`claims_to_context` mapper.
+- :class:`Authenticator` protocol + :class:`EntraTokenAuthenticator`
+  production impl (PyJWT + JWKS + audience/issuer/expiry checks +
+  required-role check) + :class:`StubAuthenticator` for dev + tests.
+- :class:`AuditEvent` structured record + :class:`AuditEventEmitter`
+  with :class:`LoggingAuditSink` (prod default) and
+  :class:`NullAuditSink` (test default).
+- :class:`AllowlistAuthzPolicy.enforce_read` extended to emit
+  ``authz.granted`` / ``authz.denied`` audit events through the shared
+  emitter (backwards-compatible: constructors without an emitter get a
+  `NullAuditSink`).
+- Six new `Settings` fields under the ``ENTRA_*`` and ``EGP_AUTH_*``
+  namespaces (all optional; missing required fields fail-closed at
+  authenticator construction).
+- Bicep provisioning for the Entra app registration + three app roles
+  (`Clinician`, `Auditor`, `Admin`) — F09.1.
+- Two security docs: [`docs/security/entra.md`](../security/entra.md)
+  (provisioning + runtime config) and
+  [`docs/security/allowlist.md`](../security/allowlist.md) (allowlist
+  schema + lifecycle + fail-closed behaviour).
+- DI container exposes `audit_emitter` + `authenticator` singletons;
+  the built `AllowlistAuthzPolicy` shares the emitter.
+- 34 new unit tests: claims, audit, authenticator (stub + real, with a
+  locally-signed RS256 test token), plus an end-to-end test proving
+  bearer-token → ctx → Repository call → authz decision → audit event.
 
-### Sections 2–11
+**Out of scope (→ later):**
 
-Filled in when the workstream starts.
+- FastAPI middleware wiring (F09.2 marked as F09.2 in the plan but
+  requires an HTTP layer that doesn't exist yet — W07 delivers the
+  `Authenticator` protocol that the API layer will call).
+- Live-Entra integration test (needs a preprod token; F09.2 acceptance
+  criterion).
+- OTEL `trace_id` correlation into `AuditEvent.trace_id` (→ W08 owns
+  OTEL; the field is already reserved on the event).
+
+### 2. Mapping to the engineering plan
+
+| Plan feature | Deliverable | Where |
+|---|---|---|
+| **F09.1** — Entra app registration + roles | Bicep template with three app roles | [`infra/entra/app-registration.bicep`](../../infra/entra/app-registration.bicep) |
+| **F09.1** — Provisioning docs | Step-by-step + env-var table | [`docs/security/entra.md`](../security/entra.md) |
+| **F09.2** — JWT middleware + `ClinicianContext` | `Authenticator` protocol + `EntraTokenAuthenticator` production impl (middleware is API-layer scope, added when the FastAPI app arrives) | [`auth/authenticator.py`](../../epg-maf/src/egp_maf/auth/authenticator.py) |
+| **F09.2** — Missing token → 401; invalid signature/expired → 401; wrong role → 403; `ClinicianContext` populated | `AuthenticationError` typed to 401; role check raises the same; all outcomes emit audit events | Unit tests in [`test_authenticator.py`](../../epg-maf/tests/unit/auth/test_authenticator.py) |
+| **F09.2** — 30 s leeway on `nbf` | `ENTRA_LEEWAY_SECONDS` (default 30) forwarded to `jwt.decode` | [`settings.py`](../../epg-maf/src/egp_maf/config/settings.py) |
+| **F09.3** — Allowlist v1 | Delivered in W02; W07 wires the shared audit emitter through it | [`services/authz.py`](../../epg-maf/src/egp_maf/services/authz.py) |
+| **F09.3** — Denied access → `AccessDenied` → 403 with trace_id + audit event | Trace_id is a first-class field on `AuditEvent`; W08 populates from active span | [`auth/audit.py`](../../epg-maf/src/egp_maf/auth/audit.py) |
+| **F09.3** — Hot-reload allowlist on file change | Owned by W02 (`AllowlistAuthzPolicy._reload_if_stale`) | — |
+| **F09.3** — Test matrix: allowed × denied × unknown clinician × unknown patient | Full matrix in `test_end_to_end.py`; W02 owns single-policy cases | [`test_end_to_end.py`](../../epg-maf/tests/unit/auth/test_end_to_end.py) |
+| **F09.4** — Audit event schema | Typed `AuditEvent` model + 4 `emit_*` methods on `AuditEventEmitter` | [`auth/audit.py`](../../epg-maf/src/egp_maf/auth/audit.py) |
+| **F09.4** — Denied access emits `authz.denied` with `clinician_id`, `patient_id`, `route`, `trace_id` | Verified by `test_end_to_end.py::test_denied_read_produces_authz_denied_audit` | [`test_end_to_end.py`](../../epg-maf/tests/unit/auth/test_end_to_end.py) |
+| **F09.4** — Event present in LAW query | `LoggingAuditSink` writes to the ``egp_maf.audit`` logger which W08's OTEL exporter routes to the audit workspace | Design §21 |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**Zero new MAF touch points in W07.** Auth is a layer *around* MAF —
+the `ClinicianContext` W07 produces is exactly the one every
+`SpecialistExecutor` (W05) already threads to every Repository call
+(W03). MAF's `ChatAgent`/`Workflow` classes never see the token, and
+that's by design (Design §19.3).
+
+### 4. Files created
+
+<details>
+<summary>Source (5 auth module files)</summary>
+
+```
+epg-maf/src/egp_maf/auth/__init__.py                (re-exports)
+epg-maf/src/egp_maf/auth/claims.py                  (ClinicianTokenClaims + claims_to_context)
+epg-maf/src/egp_maf/auth/audit.py                   (AuditEvent + AuditEventEmitter + Logging/Null sinks)
+epg-maf/src/egp_maf/auth/authenticator.py           (Authenticator protocol + Entra/Stub impls + build_authenticator factory)
+```
+</details>
+
+<details>
+<summary>Tests (3 files, 34 test cases)</summary>
+
+```
+epg-maf/tests/unit/auth/__init__.py
+epg-maf/tests/unit/auth/test_claims.py              (~8 tests — claim decode + context mapping)
+epg-maf/tests/unit/auth/test_audit.py               (~9 tests — event shape + emitter + sinks)
+epg-maf/tests/unit/auth/test_authenticator.py       (~14 tests — stub + real Entra impl w/ RS256 token)
+epg-maf/tests/unit/auth/test_end_to_end.py          (~3 tests — token → ctx → repo → authz + audit)
+```
+</details>
+
+<details>
+<summary>Infra + docs (3 files)</summary>
+
+```
+infra/entra/app-registration.bicep                  (Entra app + 3 app roles)
+docs/security/entra.md                              (provisioning + runtime config + audit trail)
+docs/security/allowlist.md                          (allowlist schema + lifecycle + fail-closed)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/pyproject.toml` | Added `pyjwt[crypto]>=2.13.0,<3` runtime dependency. |
+| `epg-maf/src/egp_maf/config/settings.py` | +6 auth fields: `entra_tenant_id`, `entra_expected_audience`, `entra_expected_issuer`, `entra_jwks_url`, `entra_leeway_seconds`, `auth_stub_enabled`, `auth_required_role`. |
+| `epg-maf/src/egp_maf/services/authz.py` | `AllowlistAuthzPolicy` accepts an optional `AuditEventEmitter`; `enforce_read` emits `authz.granted` / `authz.denied` events. Backwards-compatible — default is `NullAuditSink` so W02 tests unchanged. |
+| `epg-maf/src/egp_maf/di/container.py` | `Container` exposes `audit_emitter` + `authenticator`; `build_container` constructs both and passes the emitter into `AllowlistAuthzPolicy`. |
+| `epg-maf/tests/unit/test_di_container.py` | Test factory builds the two new singletons; wiring test constructs the container in stub mode and asserts both types. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**Authenticator behind a protocol (same pattern as W04's `RouterLlm`
+and W05's `SpecialistLlm`).** Production uses
+:class:`EntraTokenAuthenticator` — PyJWT `decode` with JWKS-fetched
+RS256 signing key, enforced against `ENTRA_EXPECTED_AUDIENCE` /
+`ENTRA_EXPECTED_ISSUER` / expiry / `EGP_AUTH_REQUIRED_ROLE`. Tests use
+:class:`StubAuthenticator` which accepts a JSON claim dict as the
+"token" — signature-less but runs the same claims-mapping + role-check
+pipeline so the produced `ClinicianContext` is shape-identical.
+Production refuses to construct the stub (`ConfigurationError` if
+`env='prod'`).
+
+**Injected signing-key resolver keeps the real class fully testable
+without the network.** The Entra test class mints a locally-signed
+RS256 token with a private key generated in-process and passes the
+corresponding public key via `signing_key_resolver` — the JWKS fetch
+is skipped but every other check (audience / issuer / expiry / role
+/ signature verification against the correct key) runs exactly as it
+would in production. This is what lets us test the wrong-audience,
+wrong-issuer, wrong-signature, expired-token, and missing-role
+branches with real PyJWT decoding.
+
+**Audit is a first-class model, not a log line.** :class:`AuditEvent`
+is a typed Pydantic model with a stable four-field schema (`event`,
+`outcome`, `clinician_id`, `tenant_id`, `patient_id`, `route`,
+`reason`, `trace_id`, `timestamp`). Sinks are pluggable so W08's OTEL
+exporter can subscribe to the same events without any refactor. The
+current `LoggingAuditSink` writes to the dedicated `egp_maf.audit`
+logger (routed separately from the main app logger in prod so LAW
+queries can pull audit events without noise).
+
+**Fail-closed by construction.** If any `ENTRA_*` env var is missing
+and the stub is not enabled, :class:`EntraTokenAuthenticator.__init__`
+raises `ConfigurationError` at startup. If the allowlist file goes
+missing at runtime, `AllowlistAuthzPolicy._reload_if_stale` raises
+`ConfigurationError` on the next call rather than silently allowing.
+If no allowlist is configured at all, the policy denies everyone
+except the built-in `system` context (background jobs / tests). Every
+decision has a defensive default that rejects.
+
+**AllowlistAuthzPolicy extended without breaking W02 callers.** The
+`audit` parameter is optional with a `NullAuditSink` default — the W02
+repository tests and test doubles that construct the policy without
+the DI container see no behavioural change. Production always goes
+through `build_container`, which passes the shared emitter.
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| Claim decoding + context mapping | `tests/unit/auth/test_claims.py` | ~8 | unit |
+| Audit event + emitter + sinks | `tests/unit/auth/test_audit.py` | ~9 | unit |
+| Authenticator (stub + real, RS256 token) | `tests/unit/auth/test_authenticator.py` | ~14 | unit |
+| Bearer token → ctx → Repository → authz + audit | `tests/unit/auth/test_end_to_end.py` | ~3 | unit |
+| DI wiring | `tests/unit/test_di_container.py` | +1 | unit |
+| **W07 subtotal** | | **~35** | |
+| **Programme total (W01–W07)** | | **292 passing** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+.\.venv\Scripts\python.exe -m pytest -m "not integration and not parity" -q
+# Just the auth suite:
+.\.venv\Scripts\python.exe -m pytest tests/unit/auth -q
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+**Not applicable.** The prototype has no authentication (Discovery
+§9: `clinician_id`, `conversation_id`, `clinician_specialty` are
+declared but unused). W07 is a net-new capability, not a port.
+
+### 9. Validation Checklist (paste into PR)
+
+**Claims + context**
+
+- [ ] `pytest tests/unit/auth/test_claims.py -v` — all green.
+- [ ] Missing `oid` or `tid` raises `ClaimsMappingError`.
+- [ ] Malformed `exp` raises `ClaimsMappingError`.
+- [ ] `roles` empty in the token → empty `frozenset` on the context (not an error).
+
+**Authenticator (real Entra impl)**
+
+- [ ] `pytest tests/unit/auth/test_authenticator.py -v` — all green.
+- [ ] Wrong audience → `AuthenticationError` + `auth.token_invalid` event.
+- [ ] Wrong issuer → `AuthenticationError`.
+- [ ] Expired token → `AuthenticationError`.
+- [ ] Bad signature → `AuthenticationError`.
+- [ ] Missing required role → `AuthenticationError` + `auth.role_denied` event.
+- [ ] Missing `ENTRA_*` config → `ConfigurationError` at construction time (fail-closed).
+
+**Authenticator (stub)**
+
+- [ ] Stub refuses to construct in production (`env='prod'`).
+- [ ] Same claim-shape produced as the real impl for the same claims dict.
+
+**Audit events**
+
+- [ ] `pytest tests/unit/auth/test_audit.py -v` — all green.
+- [ ] Every `AuditEvent` has a stable schema (`extra='forbid'`).
+- [ ] `LoggingAuditSink` writes to `egp_maf.audit` logger with structured extras.
+- [ ] `NullAuditSink` is a genuine no-op.
+
+**Allowlist end-to-end**
+
+- [ ] `pytest tests/unit/auth/test_end_to_end.py -v` — all green.
+- [ ] Bearer token → ctx → authorised repository read produces one `authz.granted` event.
+- [ ] Bearer token → ctx → denied repository read produces `AccessDenied` + one `authz.denied` event with `clinician_id` + `patient_id` + `reason`.
+- [ ] Wrong-role token never reaches the repository (stopped at authenticator with `auth.role_denied`).
+
+**DI wiring**
+
+- [ ] `pytest tests/unit/test_di_container.py -v` — all green.
+- [ ] `Container.authenticator` is an :class:`Authenticator` and, in stub mode, a :class:`StubAuthenticator`.
+- [ ] `Container.audit_emitter` is an :class:`AuditEventEmitter`.
+- [ ] `AllowlistAuthzPolicy` shares the container's emitter (both denied and granted paths emit).
+
+**Repository hygiene**
+
+- [ ] `git status --porcelain agents/ config/ test_data/` is empty (prototype untouched).
+- [ ] No `agent_framework` imports in `egp_maf.auth.*` (auth is a layer around MAF, not part of it).
+
+### 10. Known follow-ups (out of scope for W07)
+
+- **FastAPI middleware** wrapping `Authenticator.authenticate` on the `/chat` route — arrives with the HTTP layer (later workstream).
+- **Live-Entra integration test** with a preprod token (F09.2 acceptance).
+- **`AuditEvent.trace_id` populated from active OTEL span** (→ W08).
+- **Phase-3 policy engine** replacing the allowlist file (Discovery §R-09).
+- **`Auditor`-role read endpoints** — currently the required-role check rejects `Auditor`; separate audit-read routes need their own required-role override.
+
+### 11. Sign-off
+
+- [ ] SEC — threat-model review (token flow, audit contract, fail-closed defaults)
+- [ ] SA — protocol seam review (Authenticator + AuditEventEmitter)
+- [ ] BE2 — implementation reviewer
+- [ ] QA — test coverage sign-off
 
 ---
 
@@ -1899,3 +2148,4 @@ Filled in when the workstream starts.
 | 2026-07-09 | W04 (MAF Workflow Skeleton) implementation complete. Chat + orchestration sub-workflow on `agent-framework 1.10.0`; state models with set-append reducer; router decision types; fan-out plumbing dormant at width 1; iteration budget with typed `RoutingBudgetExceeded`. 49 new unit tests; 212 total passing. | Delivery Lead |
 | 2026-07-09 | W05 (Specialist Agents) implementation complete. `SpecialistBase` template + 5 concrete specialists with domain-specific derived fields + family-history privacy strip; 14 `@tool` shims; MAF-backed `SpecialistLlm` bridge; `SpecialistExecutor` replaces W04 placeholder; `SpecialistRegistry` wired via DI. Latent W01 `OpenAIChatClient(model_id=)` typo fixed on the way through. 24 new unit tests; 236 total passing. | Delivery Lead |
 | 2026-07-10 | W06 (Parallel Execution & Mode-Parity) implementation complete. Business-behaviour parity harness + deterministic `SpecialistRegistry` fixture + `parity_diff.deep_diff` helper; `mode_parity` pytest marker; `dispatch_mode_summary()` helper on `Settings`; `orch.mode` + `orch.width` on dispatch log events; `docs/config/orchestration.md` + `docs/runbooks/enable-parallel-dispatch.md` published. Harness caught a real state-sharing bug in the deterministic fixture on the first draft — fixed by building a fresh registry per run. 19 new tests; 258 total passing. | Delivery Lead |
+| 2026-07-10 | W07 (Authentication & Authorization) implementation complete. Entra JWT authenticator (PyJWT + JWKS + audience/issuer/expiry + required-role) behind an :class:`Authenticator` protocol seam; :class:`StubAuthenticator` for dev/tests refuses to construct in prod; structured :class:`AuditEvent` model + `LoggingAuditSink` routed via `egp_maf.audit` logger; `AllowlistAuthzPolicy` emits `authz.granted` / `authz.denied` (backwards-compatible with W02); DI container exposes `authenticator` + `audit_emitter`; Bicep for Entra app registration + 3 app roles; `docs/security/entra.md` + `docs/security/allowlist.md`. 34 new tests; 292 total passing. | Delivery Lead |

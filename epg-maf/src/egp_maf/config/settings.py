@@ -114,6 +114,28 @@ class Settings(BaseSettings):
     # secret to this path at container start.
     authz_allowlist_path: str | None = Field(default=None, alias="EGP_AUTHZ_ALLOWLIST_PATH")
 
+    # ── Authentication (W07 — Entra ID) ────────────────────────────
+    # These configure the JWT verifier that maps a bearer token onto a
+    # :class:`~egp_maf.state.clinician_context.ClinicianContext`.
+    #
+    # In dev, ``auth_stub_enabled=true`` bypasses signature verification
+    # and lets callers supply plain JSON claims (used by unit tests and
+    # the dev docker-compose profile). In preprod / prod this flag is
+    # false; a JWKS endpoint + expected issuer/audience are required.
+    entra_tenant_id: str | None = Field(default=None, alias="ENTRA_TENANT_ID")
+    entra_expected_audience: str | None = Field(
+        default=None, alias="ENTRA_EXPECTED_AUDIENCE"
+    )
+    entra_expected_issuer: str | None = Field(
+        default=None, alias="ENTRA_EXPECTED_ISSUER"
+    )
+    entra_jwks_url: str | None = Field(default=None, alias="ENTRA_JWKS_URL")
+    entra_leeway_seconds: int = Field(
+        default=30, alias="ENTRA_LEEWAY_SECONDS", ge=0, le=300
+    )
+    auth_stub_enabled: bool = Field(default=False, alias="EGP_AUTH_STUB_ENABLED")
+    auth_required_role: str = Field(default="Clinician", alias="EGP_AUTH_REQUIRED_ROLE")
+
     # ── Pydantic-settings config ───────────────────────────────────
     model_config = SettingsConfigDict(
         env_file=".env",

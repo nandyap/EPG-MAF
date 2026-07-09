@@ -30,6 +30,9 @@ dependencies = [
     # Structured logging
     "structlog>=24.4.0,<25",
 
+    # JWT validation for Entra ID tokens (W07 auth)
+    "pyjwt[crypto]>=2.13.0,<3",
+
     # Env file support
     "python-dotenv>=1.0.1,<2",
 ]
