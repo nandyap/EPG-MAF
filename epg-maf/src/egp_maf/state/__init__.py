@@ -5,9 +5,8 @@
 - :class:`DBProvenance` — audit-trail record linking a clinical fact to its
   DB source row.
 - :class:`SessionDocument` — persisted conversation state, stored in Cosmos.
-
-Specialist output types (``PRSStateOutput``, ``GenomicVariantsStateOutput``,
-etc.) are added in the specialist workstream.
+- :mod:`egp_maf.state.results` — typed domain models returned by
+  :mod:`egp_maf.services.repositories` (W03).
 """
 
 from egp_maf.state.clinician_context import ClinicianContext

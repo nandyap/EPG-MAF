@@ -42,7 +42,7 @@ Every workstream section carries the same subsections in the same order:
 |---|---|---|---|---|---|---|---|
 | W01 | [Foundation](#workstream-w01--foundation-) | ✅ Complete | 1 | Delivery Lead | 25 / 15 | ~2,370 | — |
 | W02 | [Clinical Data Layer](#workstream-w02--clinical-data-layer-) | ✅ Complete | 2 | DE + BE2 | 14 / 7 | ~1,650 | W01 |
-| W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ⏳ Not started | 2–3 | BE2 | — | — | W01, W02 |
+| W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ✅ Complete | 2–3 | BE2 | 11 / 7 | ~2,520 | W01, W02 |
 | W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ⏳ Not started | 4 | BE1 | — | — | W01, W03 |
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ⏳ Not started | 4–5 | BE2 | — | — | W03, W04 |
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ⏳ Not started | 5 | BE1 + QA | — | — | W04, W05 |
@@ -74,7 +74,8 @@ flowchart LR
     classDef pending fill:#f0f0f0,stroke:#999,stroke-dasharray:4 4
     class W01 done
     class W02 done
-    class W03,W04,W05,W06,W07,W08,W09,W10,W11 pending
+    class W03 done
+    class W04,W05,W06,W07,W08,W09,W10,W11 pending
 ```
 
 ---
@@ -707,31 +708,263 @@ snapshots).
 
 ---
 
-## Workstream W03 — Domain Repositories & Tool Shims ⏳
+## Workstream W03 — Domain Repositories & Tool Shims ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 2–3
-**Owner:** BE2
+**Owner:** BE2 (implementation), SA (contract review), BIX (SQL-parity review)
+**PR gate reviewers:** SA · BE2 · BIX
+**Files:** 11 source (5 result modules + 5 repositories + 1 `state/results/__init__.py`) + 7 test + 3 modified in `epg-maf/`
+**LOC:** ~2,520 Python (source ~1,360 · tests ~1,160)
 **Depends on:** W01, W02
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Implement the 5 domain repositories, their tool shims, and the deterministic JSON parser.
+Realise the design promise that W02 set up: **typed domain models with
+construction-time provenance, one Repository per specialist domain**.
 
 **In scope:**
 
-- 5 domain repositories: `PRSRepository`, `GenomicVariantsRepository`, `FamilyHistoryRepository`, `PGXRepository`, `PhenotypeRepository`.
-- Provenance constructed at query time inside each Repository (Design §11.7).
-- Family-history public / internal projection split (privacy stripping at the Repository layer — Design ADR-017).
-- 5 thin domain services (pass-through in Phase 1).
-- Deterministic `annotations_json` parser (Design ADR-006).
-- 14 `ai_function` shims that delegate to the domain services.
+- 5 concrete repositories inheriting `BaseRepository`:
+  `PRSRepository`, `GenomicVariantsRepository`,
+  `FamilyHistoryRepository`, `PGXRepository`, `PhenotypeRepository`.
+- Typed result models per domain, ported byte-faithfully from the
+  prototype's `agents/<domain>/state/schemas.py`.
+- **Deterministic** `annotations_json` parser (Design ADR-006) — replaces
+  the prototype's LLM-driven JSON decomposition.
+- Family-history public/internal projection split via `.to_public()`
+  method on the internal model (Design §11.7, ADR-017).
+- Byte-faithful SQL port (DuckDB → Postgres); every `explore_/search_/get_`
+  method on the prototype maps 1:1 to a Repository method.
 
-**Out of scope:** MAF workflow, specialist agents.
+**Out of scope (→ W04/W05):**
 
-### Sections 2–11
+- `ai_function` tool shims (need MAF `ChatAgent` construction context).
+- Domain Services (thin pass-throughs — will be added alongside shims when needed).
+- Specialist wrappers, workflow, routing.
 
-Filled in when the workstream starts.
+### 2. Mapping to the LangGraph prototype
+
+| Prototype file | New home | Change |
+|---|---|---|
+| `agents/prs/tools/tools.py` (3 `@tool`s) | [`services/repositories/prs.py`](../../epg-maf/src/egp_maf/services/repositories/prs.py) | SQL preserved (Postgres-adjusted); returns typed `PRSResult` |
+| `agents/genomic_variants/tools/tools.py` (3 tools) | [`services/repositories/genomic_variants.py`](../../epg-maf/src/egp_maf/services/repositories/genomic_variants.py) | + deterministic JSON parser inline; Python — not LLM — decomposes `annotations_json` |
+| `agents/family_history/tools/tools.py` (3 tools) | [`services/repositories/family_history.py`](../../epg-maf/src/egp_maf/services/repositories/family_history.py) | Returns internal projection; `.to_public()` strips privacy fields |
+| `agents/pgx/tools/tools.py` (3 tools) | [`services/repositories/pgx.py`](../../epg-maf/src/egp_maf/services/repositories/pgx.py) | LEFT JOIN on `(gene, phenotype)` preserved |
+| `agents/phenotype/tools/tools.py` (2 tools) | [`services/repositories/phenotype.py`](../../epg-maf/src/egp_maf/services/repositories/phenotype.py) | `LIST(DISTINCT)` → `array_agg(DISTINCT)`; grouped `COALESCE` preserved |
+| `agents/prs/state/schemas.py` | [`state/results/prs.py`](../../epg-maf/src/egp_maf/state/results/prs.py) | Port; adds `PRSAnnotation` reference-row type |
+| `agents/genomic_variants/state/schemas.py` | [`state/results/genomic_variants.py`](../../epg-maf/src/egp_maf/state/results/genomic_variants.py) | Port; adds `parse_annotations_json` + `VariantAnnotation`; soft warnings use `structlog` |
+| `agents/family_history/state/schemas.py` | [`state/results/family_history.py`](../../epg-maf/src/egp_maf/state/results/family_history.py) | Port; adds `KinshipHistoryAnnotation` + `.to_public()` method |
+| `agents/pgx/state/schemas.py` | [`state/results/pgx.py`](../../epg-maf/src/egp_maf/state/results/pgx.py) | Port; adds `PGXAnnotation` |
+| `agents/phenotype/state/schemas.py` | [`state/results/phenotype.py`](../../epg-maf/src/egp_maf/state/results/phenotype.py) | Port (no annotation type — no annotation table exists) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**Zero MAF imports in W03.** Repositories are framework-agnostic. The
+`ai_function` decorator that adapts these methods into MAF tool shims
+arrives in W04/W05 when specialists are assembled.
+
+### 4. Files created
+
+<details>
+<summary>Source (11 files)</summary>
+
+```
+epg-maf/src/egp_maf/state/results/__init__.py         (re-exports)
+epg-maf/src/egp_maf/state/results/prs.py              (PRSKey, PRSAnnotation, PRSResult, PRSResultList)
+epg-maf/src/egp_maf/state/results/pgx.py              (PGXKey, PGXAnnotation, PGXDrugResult, PGXResultList)
+epg-maf/src/egp_maf/state/results/phenotype.py        (PhenotypeKey, PhenotypeDiseaseResult, PhenotypeResultList)
+epg-maf/src/egp_maf/state/results/family_history.py   (Key, Annotation, Result(internal+public), ResultList(both))
+epg-maf/src/egp_maf/state/results/genomic_variants.py (Key, Annotation, SampleData, CoreAnn, ExtendedAnn, parser, Result, ResultList)
+epg-maf/src/egp_maf/services/repositories/prs.py
+epg-maf/src/egp_maf/services/repositories/pgx.py
+epg-maf/src/egp_maf/services/repositories/phenotype.py
+epg-maf/src/egp_maf/services/repositories/family_history.py
+epg-maf/src/egp_maf/services/repositories/genomic_variants.py
+```
+</details>
+
+<details>
+<summary>Tests (6 files, ~65 test cases)</summary>
+
+```
+epg-maf/tests/support/fake_pool.py                     (test double for psycopg pool)
+epg-maf/tests/unit/test_results.py                     (~15 tests — all result models)
+epg-maf/tests/unit/test_variant_parser.py              (~13 tests — JSON parser edge cases)
+epg-maf/tests/unit/test_family_history_strip.py        (~5 tests — privacy strip contract)
+epg-maf/tests/unit/test_repositories.py                (~14 tests — repositories with fake pool)
+epg-maf/tests/integration/test_repositories.py         (~5 tests — real Postgres end-to-end)
+epg-maf/tests/parity/test_repository_parity.py         (~5 tests — Repo vs DuckDB field parity)
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/state/__init__.py` | Docstring refresh (points to `state.results`); public API unchanged. |
+| `epg-maf/src/egp_maf/services/__init__.py` | Re-exports 5 new repository classes. |
+| `epg-maf/src/egp_maf/services/repositories/__init__.py` | Re-exports 5 new repository classes. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**Uniform Repository shape.**
+Every domain Repository inherits `BaseRepository`, adds public `async` methods
+that mirror the prototype's tool names 1:1, calls `self._authorize(ctx,
+patient_id)` on any patient-scoped call, uses `self._fetch_all(sql, params)`
+to run SELECTs, and builds provenance via `self._build_provenance(...)` on
+`get_patient_*` methods only. `explore_*` and `search_*_annotations` do not
+build provenance (Discovery §5.7 — preserved).
+
+**Postgres-adjusted SQL.**
+Mechanical adjustments only: `?` → `%s`, `LIST(DISTINCT x)` → `array_agg(
+DISTINCT x)`, `CAST(x AS VARCHAR)` → `to_char(x, 'YYYY-MM-DD')` for dates.
+Everything else — `ILIKE`, `COALESCE`, `LEFT JOIN`, index-friendly WHERE
+ordering — is unchanged and Postgres-native.
+
+**Deterministic JSON parser (Design ADR-006).**
+[`parse_annotations_json`](../../epg-maf/src/egp_maf/state/results/genomic_variants.py) accepts `None`,
+`""`, a JSON string, or a dict. Known keys are promoted to typed fields;
+unknown keys go into `raw_annotations`. Malformed JSON raises
+`ValueError` — no silent fallback. Removes the prototype's silent-
+hallucination clinical-safety risk.
+
+**Family-history privacy split at the model layer.**
+[`FamilyHistoryCriteriaResult.to_public()`](../../epg-maf/src/egp_maf/state/results/family_history.py) returns a
+`FamilyHistoryCriteriaResultPublic` with three privacy-sensitive fields
+absent from the type entirely and stripped from every provenance
+`source_row`. The Repository returns the internal projection — the
+specialist calls `.to_public()` before writing to orchestrator state.
+
+**RBAC first, always.**
+Every patient-scoped method starts with `self._authorize(ctx, patient_id)`.
+`search_*_annotations` reference-only methods do NOT authorise —
+reference data is public within the system.
+
+**Structured warning for unknown pathogenicity / variant_type.**
+`VariantCoreAnnotations` post-validator now emits a `variant.unknown_value`
+structured event via `structlog` (instead of the prototype's
+`logging.warning`). Same soft-warning semantics; machine-parseable event
+for W08 alerting.
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| Result models | `tests/unit/test_results.py` | ~15 | unit |
+| JSON parser | `tests/unit/test_variant_parser.py` | ~13 | unit |
+| Family-history strip | `tests/unit/test_family_history_strip.py` | ~5 | unit |
+| Repositories (fake pool) | `tests/unit/test_repositories.py` | ~14 | unit |
+| Repositories (real PG) | `tests/integration/test_repositories.py` | ~5 | integration |
+| Row + field parity vs DuckDB | `tests/parity/test_repository_parity.py` | ~5 | parity |
+| **W03 subtotal** | | **~57** | |
+| **Programme total (W01–W03)** | | **~190** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+pytest -m "not integration"            # unit + parity (skips if no PG)
+$env:EGP_TEST_POSTGRES = "1"
+pytest -m integration                  # requires seeded local Postgres
+pytest -m parity                       # requires PG + DuckDB present
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+Three layered parity checks land in W03:
+
+1. **SQL text preserved.** Every `explore_/search_/get_` SQL block is a
+   line-by-line port; only mechanical Postgres adjustments were made.
+2. **Row-count parity per patient** (`test_repository_parity.py`) — for
+   each domain's `get_patient_*`, run against Postgres and DuckDB with the
+   same patient and assert equal counts.
+3. **Key-set parity** — for PRS/variants the parity test compares the
+   set of returned `prs_name`s / `variant_id`s; for family history the
+   `(disease_name, criteria_name, meets_threshold)` triples must match;
+   for phenotype the `disease_name → encounter_count` map must match
+   (grouping semantics preserved).
+
+Column-value parity for LLM-derived fields (interpretations, summaries)
+is not applicable — those don't exist yet.
+
+### 9. Validation Checklist (paste into PR)
+
+**Result models**
+
+- [ ] `pytest tests/unit/test_results.py -v` — all green.
+- [ ] `PRSResult.risk_band` rejects values outside the 4-value vocabulary.
+- [ ] `PRSResult.percentile` bounds enforced (0–100).
+- [ ] Every result model rejects unknown fields (`extra='forbid'`).
+- [ ] LLM-derived fields default to `None` (Repository never populates them).
+
+**JSON parser**
+
+- [ ] `pytest tests/unit/test_variant_parser.py -v` — all green.
+- [ ] `None`, `""`, `{}` → empty `VariantExtendedAnnotations` (never raises).
+- [ ] Known keys promoted to typed slots.
+- [ ] Unknown keys land in `raw_annotations`.
+- [ ] Malformed JSON raises `ValueError` — no silent fallback.
+- [ ] `acmg_criteria: "PS1"` (string) coerces to `["PS1"]`.
+
+**Family-history privacy strip**
+
+- [ ] `pytest tests/unit/test_family_history_strip.py -v` — all green.
+- [ ] `FamilyHistoryCriteriaResultPublic.model_fields` does not contain the three privacy keys.
+- [ ] Provenance `source_row` also has the three keys stripped.
+- [ ] `to_public()` does NOT mutate the internal result.
+- [ ] `diseases_meeting_threshold` correctly carried over on the list-level projection.
+
+**Repositories (unit)**
+
+- [ ] `pytest tests/unit/test_repositories.py -v` — all green.
+- [ ] Every `explore_*` returns typed keys, no provenance.
+- [ ] Every `search_*_annotations` returns typed annotation rows, no provenance, does NOT authorise.
+- [ ] Every `get_patient_*` returns typed results with exactly one `DBProvenance` record per row.
+- [ ] RBAC denial raises `AccessDenied` from `get_patient_*` and `explore_*`.
+- [ ] All SQL text uses `%s` placeholders, never `?`.
+
+**Repositories (integration — requires seeded PG)**
+
+- [ ] `EGP_TEST_POSTGRES=1 pytest -m integration -k test_repositories` — all green.
+- [ ] Every domain's `explore_*` and `get_patient_*` returns non-empty typed results for the first available patient.
+- [ ] Family-history `.to_public()` verified end-to-end.
+
+**Parity vs DuckDB**
+
+- [ ] `EGP_TEST_POSTGRES=1 pytest -m parity -k test_repository_parity` — all green.
+- [ ] Row-count parity per domain.
+- [ ] Key-set parity per domain.
+
+**PHI hygiene**
+
+- [ ] `git grep -n "search_context_notes" epg-maf/src` — hits only in `state/results/family_history.py` (declared field + strip logic) and `services/repositories/family_history.py` (SELECT + result construction). No downstream.
+- [ ] `git grep -n "affected_relative_count" epg-maf/src` — same three files only.
+- [ ] `FamilyHistoryCriteriaResultPublic.model_fields` never contains those three names.
+
+**Repository hygiene**
+
+- [ ] `git status --porcelain agents/ config/ test_data/ tests/` is empty (prototype untouched).
+- [ ] No `IRepository` protocol re-introduced (removed in the W02 cleanup).
+- [ ] No `OpenAuthzPolicy` / `ClosedAuthzPolicy` in `src/` (test-only, live in `tests/support/`).
+
+### 10. Known follow-ups (out of scope for W03)
+
+- `ai_function` tool shims (→ W04/W05) that wrap Repository methods and adapt them to MAF `ChatAgent`.
+- Domain Services layer (→ W05) if a specialist needs to compose more than one Repository.
+- OTEL context provider wired into `ProvenanceService` (→ W08).
+- Phenotype grouping variance: the prototype's OR-combining of `disease_name` + `search_term` filters is preserved verbatim; a comprehensive filter-permutation test comes with the specialist evaluation in W10.
+
+### 11. Sign-off
+
+- [ ] SA — Repository contract review
+- [ ] BE2 — implementation reviewer
+- [ ] BIX SME — SQL-parity spot check + parser edge cases
+- [ ] QA — test coverage sign-off
 
 ---
 
@@ -950,3 +1183,5 @@ Filled in when the workstream starts.
 | 2026-07-09 | Consolidated document created. W01 section carried over from `W01-foundation.md` (superseded); roadmap and progress dashboard added. | Delivery Lead |
 | 2026-07-09 | W02 (Clinical Data Layer) implementation complete. Section filled in; progress dashboard + diagram updated. | Delivery Lead |
 | 2026-07-09 | W02 cleanup: removed unused `IRepository` protocol; moved `OpenAuthzPolicy` / `ClosedAuthzPolicy` from `src/egp_maf/services/authz.py` to `tests/support/authz_doubles.py`. No behavioural change. Docs updated where they described removed classes. | Delivery Lead |
+| 2026-07-09 | W03 (Domain Repositories) implementation complete. 5 repositories + typed result models + deterministic JSON parser + family-history privacy strip. Section filled in; dashboard + diagram updated. | Delivery Lead |
+| 2026-07-09 | W03 pre-push: drive-by fixes to keep pytest fully green — repaired PEP 3110 scoping bug in `tests/unit/test_errors.py::test_error_chain` and silenced two Pydantic 2.11 `model_fields`-on-instance deprecation warnings in the two W03 family-history tests. Behaviour unchanged. | Delivery Lead |

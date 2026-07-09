@@ -1,9 +1,9 @@
-"""Repository infrastructure — base class.
+"""Repository infrastructure — base class + 5 domain repositories.
 
-The 5 domain repositories arrive in W03. This module supplies the shared
-machinery every one of them inherits: :class:`BaseRepository` owns the
-pool + authz + provenance wiring, and exposes ``_authorize`` and
-``_fetch_all`` helpers.
+Domain repositories each map to one specialist's tool set from the
+LangGraph prototype. Every one inherits :class:`BaseRepository` and adds
+domain-specific SQL methods; all cross-cutting concerns (pool acquisition,
+RBAC, provenance construction) live in the base.
 
 Design references:
 
@@ -13,5 +13,17 @@ Design references:
 """
 
 from egp_maf.services.repositories.base import BaseRepository
+from egp_maf.services.repositories.family_history import FamilyHistoryRepository
+from egp_maf.services.repositories.genomic_variants import GenomicVariantsRepository
+from egp_maf.services.repositories.pgx import PGXRepository
+from egp_maf.services.repositories.phenotype import PhenotypeRepository
+from egp_maf.services.repositories.prs import PRSRepository
 
-__all__ = ["BaseRepository"]
+__all__ = [
+    "BaseRepository",
+    "FamilyHistoryRepository",
+    "GenomicVariantsRepository",
+    "PGXRepository",
+    "PRSRepository",
+    "PhenotypeRepository",
+]

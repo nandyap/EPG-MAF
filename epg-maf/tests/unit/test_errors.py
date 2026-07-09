@@ -34,5 +34,7 @@ class TestErrorTaxonomy:
         try:
             raise ValueError("inner")
         except ValueError as inner:
+            # PEP 3110: `inner` is deleted when the `except` block exits, so
+            # assert inside the block (or save a reference beforehand).
             outer = ConfigurationError("outer", cause=inner)
-        assert outer.__cause__ is inner
+            assert outer.__cause__ is inner
