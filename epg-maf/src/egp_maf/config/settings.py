@@ -78,6 +78,12 @@ class Settings(BaseSettings):
         default=30, alias="POSTGRES_STATEMENT_TIMEOUT_SECONDS", ge=1, le=600
     )
 
+    # Migrator role (Alembic / CI only — never used by the runtime app).
+    postgres_migrator_user: str | None = Field(default=None, alias="POSTGRES_MIGRATOR_USER")
+    postgres_migrator_password: SecretStr | None = Field(
+        default=None, alias="POSTGRES_MIGRATOR_PASSWORD"
+    )
+
     # ── Cosmos DB (session / thread state) ─────────────────────────
     cosmos_endpoint: str = Field(default="https://localhost:8081", alias="COSMOS_ENDPOINT")
     cosmos_database: str = Field(default="egp", alias="COSMOS_DATABASE")
@@ -101,6 +107,12 @@ class Settings(BaseSettings):
     )
     orch_max_fanout_width: int = Field(default=1, alias="ORCH_MAX_FANOUT_WIDTH", ge=1, le=5)
     orch_iteration_budget: int = Field(default=12, alias="ORCH_ITERATION_BUDGET", ge=1, le=100)
+
+    # ── Authorization ──────────────────────────────────────────────
+    # Path to the JSON allowlist consumed by AllowlistAuthzPolicy.
+    # In dev this is a plain file path; in prod ACA mounts the Key Vault
+    # secret to this path at container start.
+    authz_allowlist_path: str | None = Field(default=None, alias="EGP_AUTHZ_ALLOWLIST_PATH")
 
     # ── Pydantic-settings config ───────────────────────────────────
     model_config = SettingsConfigDict(

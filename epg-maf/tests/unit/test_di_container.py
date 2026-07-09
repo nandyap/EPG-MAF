@@ -11,7 +11,10 @@ from egp_maf.di.container import Container, build_container
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
 from egp_maf.infrastructure.db_pool import DbPoolFactory
+from egp_maf.services.authz import AllowlistAuthzPolicy
 from egp_maf.services.prompt_service import PromptService
+from tests.support.authz_doubles import OpenAuthzPolicy
+from egp_maf.services.provenance import ProvenanceService
 from egp_maf.services.thread_state import ThreadStateProvider
 
 
@@ -70,6 +73,8 @@ def _build_test_container(settings: Settings) -> tuple[
         llm_client_factory=llm,
         prompt_service=prompt,  # type: ignore[arg-type]
         thread_state_provider=thread_state,
+        provenance_service=ProvenanceService(),
+        authz_policy=OpenAuthzPolicy(),
     )
     return container, db, cosmos, prompt
 
@@ -136,3 +141,7 @@ class TestBuildContainerWiring:
         assert isinstance(container.llm_client_factory, LlmClientFactory)
         assert isinstance(container.prompt_service, PromptService)
         assert isinstance(container.thread_state_provider, ThreadStateProvider)
+        assert isinstance(container.provenance_service, ProvenanceService)
+        # Default settings have no allowlist path → AllowlistAuthzPolicy with
+        # None inside.
+        assert isinstance(container.authz_policy, AllowlistAuthzPolicy)

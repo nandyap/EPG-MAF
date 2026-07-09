@@ -12,12 +12,16 @@ and every attribute is typed for IDE autocompletion.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from egp_maf.config.settings import Settings, get_settings
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
 from egp_maf.infrastructure.db_pool import DbPoolFactory
 from egp_maf.logging.setup import configure_logging, get_logger
+from egp_maf.services.authz import AllowlistAuthzPolicy, AuthzPolicy
 from egp_maf.services.prompt_service import PromptService
+from egp_maf.services.provenance import ProvenanceService
 from egp_maf.services.thread_state import ThreadStateProvider
 
 _logger = get_logger(__name__)
@@ -48,6 +52,8 @@ class Container:
         llm_client_factory: LlmClientFactory,
         prompt_service: PromptService,
         thread_state_provider: ThreadStateProvider,
+        provenance_service: ProvenanceService,
+        authz_policy: AuthzPolicy,
     ) -> None:
         self.settings = settings
         self.db_pool_factory = db_pool_factory
@@ -55,6 +61,8 @@ class Container:
         self.llm_client_factory = llm_client_factory
         self.prompt_service = prompt_service
         self.thread_state_provider = thread_state_provider
+        self.provenance_service = provenance_service
+        self.authz_policy = authz_policy
 
         self._started: bool = False
 
@@ -133,6 +141,14 @@ def build_container(settings: Settings | None = None) -> Container:
     llm_client_factory = LlmClientFactory(resolved_settings)
     prompt_service = PromptService(resolved_settings)
     thread_state_provider = ThreadStateProvider(cosmos_client_factory, resolved_settings)
+    provenance_service = ProvenanceService()
+
+    allowlist_path = (
+        Path(resolved_settings.authz_allowlist_path)
+        if resolved_settings.authz_allowlist_path
+        else None
+    )
+    authz_policy: AuthzPolicy = AllowlistAuthzPolicy(allowlist_path)
 
     return Container(
         settings=resolved_settings,
@@ -141,4 +157,6 @@ def build_container(settings: Settings | None = None) -> Container:
         llm_client_factory=llm_client_factory,
         prompt_service=prompt_service,
         thread_state_provider=thread_state_provider,
+        provenance_service=provenance_service,
+        authz_policy=authz_policy,
     )

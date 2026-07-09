@@ -17,6 +17,10 @@ dependencies = [
     # Async PostgreSQL (Design ADR-020)
     "psycopg[binary,pool]>=3.2.0,<4",
 
+    # DDL migrations (W02)
+    "alembic>=1.14.0,<2",
+    "sqlalchemy>=2.0.0,<3",
+
     # Azure Cosmos DB for NoSQL (session/thread state — Design ADR-010)
     "azure-cosmos>=4.9.0,<5",
 
@@ -40,6 +44,9 @@ dev = [
     "mypy>=1.11.0",
     "black>=24.10.0",
     "types-python-dateutil",
+
+    # Seed-exporter uses DuckDB to read the prototype snapshot.
+    "duckdb>=1.3.0,<2",
 ]
 
 [build-system]

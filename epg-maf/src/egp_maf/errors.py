@@ -46,6 +46,14 @@ class CosmosUnavailable(EgpError):
     http_status = 503
 
 
+class AccessDenied(EgpError):
+    """Raised when a clinician is not authorised to access the requested
+    resource (typically a patient_id)."""
+
+    error_code = "access_denied"
+    http_status = 403
+
+
 class SchemaEvolutionError(EgpError):
     """Raised when a persisted ``SessionDocument`` has an unsupported schema
     version."""

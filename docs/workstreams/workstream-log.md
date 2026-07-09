@@ -41,7 +41,7 @@ Every workstream section carries the same subsections in the same order:
 | # | Workstream | Status | Sprint | Owner | Files (src / test) | LOC | Depends on |
 |---|---|---|---|---|---|---|---|
 | W01 | [Foundation](#workstream-w01--foundation-) | ✅ Complete | 1 | Delivery Lead | 25 / 15 | ~2,370 | — |
-| W02 | [Clinical Data Layer](#workstream-w02--clinical-data-layer-) | ⏳ Not started | 2 | DE + BE2 | — | — | W01 |
+| W02 | [Clinical Data Layer](#workstream-w02--clinical-data-layer-) | ✅ Complete | 2 | DE + BE2 | 14 / 7 | ~1,650 | W01 |
 | W03 | [Domain Repositories & Tool Shims](#workstream-w03--domain-repositories--tool-shims-) | ⏳ Not started | 2–3 | BE2 | — | — | W01, W02 |
 | W04 | [MAF Workflow Skeleton](#workstream-w04--maf-workflow-skeleton-) | ⏳ Not started | 4 | BE1 | — | — | W01, W03 |
 | W05 | [Specialist Agents](#workstream-w05--specialist-agents-) | ⏳ Not started | 4–5 | BE2 | — | — | W03, W04 |
@@ -73,7 +73,8 @@ flowchart LR
     classDef done fill:#c9f7c9,stroke:#2a7f2a,color:#154315
     classDef pending fill:#f0f0f0,stroke:#999,stroke-dasharray:4 4
     class W01 done
-    class W02,W03,W04,W05,W06,W07,W08,W09,W10,W11 pending
+    class W02 done
+    class W03,W04,W05,W06,W07,W08,W09,W10,W11 pending
 ```
 
 ---
@@ -86,7 +87,7 @@ workstream's own section below.
 | # | Name | One-line goal |
 |---|---|---|
 | W01 | Foundation | Config, DI, logging, prompt loader, Postgres pool, Cosmos client, thread-state provider, Compass client factory. No agents. |
-| W02 | Clinical Data Layer | Postgres schema port, seed from DuckDB, Alembic, `IRepository` base, `ProvenanceService`, `AuthzPolicy` allowlist v1. |
+| W02 | Clinical Data Layer | Postgres schema port, seed from DuckDB, Alembic, `BaseRepository`, `ProvenanceService`, `AuthzPolicy` allowlist v1. |
 | W03 | Domain Repositories & Tool Shims | 5 domain repositories with construction-time provenance, family-history privacy stripping, deterministic JSON parser, 14 `ai_function` shims. |
 | W04 | MAF Workflow Skeleton | Chat workflow + orchestration sub-workflow, `SpecialistDispatchSet` decision type, fan-out/fan-in edges (dormant with size 1), streaming events. |
 | W05 | Specialist Agents | 5 specialist wrappers (PRS, GV, FH, PGX, Phenotype) with ReAct + structured extraction + provenance attachment. |
@@ -381,32 +382,328 @@ End-to-end behavioural parity harnesses (specialist output snapshots, mode-parit
 
 ---
 
-## Workstream W02 — Clinical Data Layer ⏳
+## Workstream W02 — Clinical Data Layer ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 2
-**Owner:** DE (primary), BE2 (integration), SA (review)
+**Owner:** DE + BE2 (implementation), SA (contract review), SEC (allowlist review)
+**PR gate reviewers:** SA · DE · SEC
+**Files:** 14 source (7 new + 7 updated) + 7 test = 21 in `epg-maf/`
+**LOC:** ~1,650 Python + 550 SQL + 8 config
 **Depends on:** W01
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Produce a production-ready PostgreSQL representation of the current DuckDB schema, plus the base classes and services (`IRepository`, `ProvenanceService`, `AuthzPolicy`) that all downstream repositories will build on.
+Build the load-bearing data seam described in Discovery §24.5. Everything a
+W03 domain Repository needs — Postgres schema, seed pipeline, Alembic
+migrations, `BaseRepository`, `ProvenanceService`,
+`AuthzPolicy` allowlist v1 — is delivered here.
 
 **In scope:**
 
-- Postgres 16 schema port (all 10 tables, constraints, indexes) — Design §11.2.
-- Seed dataset export from the DuckDB snapshot.
-- Alembic migration mechanism + `egp_agent_ro` / `egp_migrator` roles.
-- Data-quality invariant tests (denormalisation invariants — Design §11 / Discovery §22 M7).
-- `IRepository[TQuery, TResult]` protocol.
-- `ProvenanceService` — construction-time `DBProvenance` builder.
-- `AuthzPolicy` allowlist v1 (Key Vault-backed JSON, hot-reload).
+- Postgres 16 schema port of all 10 DuckDB tables (Design §11.2).
+- One-shot DuckDB→CSV seed exporter + `psql \copy` load script.
+- Alembic migration mechanism with hand-written `001_baseline_schema`.
+- `egp_migrator` (DDL) and `egp_agent_ro` (SELECT-only) role bootstrap.
+- `DBProvenance` ported (with new `trace_id`/`span_id` fields for W08).
+- `ProvenanceService` — factory for construction-time provenance.
+- `AuthzPolicy` protocol + `AllowlistAuthzPolicy` (JSON file, mtime hot-reload).
+  Test doubles `OpenAuthzPolicy` / `ClosedAuthzPolicy` live in
+  `tests/support/authz_doubles.py` (moved out of `src/` in the W02 cleanup
+  commit — see change history).
+- `BaseRepository` (pool + authz + provenance wiring).
+- `AccessDenied` typed exception (403).
+- New `POSTGRES_MIGRATOR_*` and `EGP_AUTHZ_ALLOWLIST_PATH` settings.
+- Data-quality invariant tests (Discovery §22 M7).
 
-**Out of scope:** the 5 domain-specific repositories (that's W03).
+**Out of scope (deferred to W03):**
 
-### Sections 2–11
+- The 5 domain repositories (`PRSRepository`, `GenomicVariantsRepository`,
+  `FamilyHistoryRepository`, `PGXRepository`, `PhenotypeRepository`).
+- The deterministic `annotations_json` parser.
+- The 14 `ai_function` tool shims.
 
-Filled in when the workstream starts.
+### 2. Mapping to the LangGraph prototype
+
+| Prototype file | New home | Change |
+|---|---|---|
+| [`test_data/schema.sql`](../../test_data/schema.sql) (DuckDB) | [`epg-maf/db/schema/V001__baseline.sql`](../../epg-maf/db/schema/V001__baseline.sql) | Mechanical Postgres port: `JSON`→`jsonb`, `DEFAULT nextval(...)`→`GENERATED BY DEFAULT AS IDENTITY`, `VARCHAR`→`text`, `NOT NULL` tightened on composite-PK columns. All CHECK constraints, FKs, PKs, indexes preserved verbatim. |
+| [`test_data/clinical_genetics.duckdb`](../../test_data/clinical_genetics.duckdb) (13.76 MB seeded blob) | [`epg-maf/db/seed/export_from_duckdb.py`](../../epg-maf/db/seed/export_from_duckdb.py) + [`load.sql`](../../epg-maf/db/seed/load.sql) | Script-based export (run locally once — CSVs land in `db/seed/data/`, gitignored). |
+| [`agents/shared/state/provenance.py::DBProvenance`](../../agents/shared/state/provenance.py) | [`epg-maf/src/egp_maf/state/provenance.py`](../../epg-maf/src/egp_maf/state/provenance.py) | Port + `trace_id`/`span_id` optional fields for W08. Uses `datetime.now(timezone.utc)` (deprecation-safe). Now `frozen=True`. |
+| Per-tool `_executor` module global (5×) | [`BaseRepository`](../../epg-maf/src/egp_maf/services/repositories/base.py) | Provenance constructed at query time (Design §11.7); post-hoc `_attach_provenance` obsolete. |
+| — | [`ProvenanceService`](../../epg-maf/src/egp_maf/services/provenance.py) | New — construction-time factory with pluggable clock and OTEL provider. |
+| — | [`AllowlistAuthzPolicy`](../../epg-maf/src/egp_maf/services/authz.py) | New — Phase 1 RBAC (Design ADR-017). |
+| — | [`Alembic env + baseline migration`](../../epg-maf/db/alembic) | New — Design §11.6. |
+| — | [`roles.sql`](../../epg-maf/db/bootstrap/roles.sql) | New — two-role separation (Design §11.5). |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+Zero MAF imports in W02. Pure infrastructure preparation. The `ai_function`
+tool shims that will consume `BaseRepository` are built in W03.
+
+### 4. Files created
+
+<details>
+<summary>Database (11 files under <code>epg-maf/db/</code>)</summary>
+
+```
+epg-maf/db/README.md
+epg-maf/db/schema/V001__baseline.sql          (~200 lines, 10 tables)
+epg-maf/db/bootstrap/roles.sql
+epg-maf/db/seed/README.md
+epg-maf/db/seed/export_from_duckdb.py
+epg-maf/db/seed/load.sql
+epg-maf/db/seed/.gitignore                    (excludes data/)
+epg-maf/db/alembic/alembic.ini
+epg-maf/db/alembic/env.py
+epg-maf/db/alembic/script.py.mako
+epg-maf/db/alembic/versions/001_baseline_schema.py
+```
+</details>
+
+<details>
+<summary>Source (5 new files)</summary>
+
+```
+epg-maf/src/egp_maf/state/provenance.py             (DBProvenance + helper)
+epg-maf/src/egp_maf/services/provenance.py          (ProvenanceService)
+epg-maf/src/egp_maf/services/authz.py               (AuthzPolicy protocol + AllowlistAuthzPolicy)
+epg-maf/src/egp_maf/services/repositories/__init__.py
+epg-maf/src/egp_maf/services/repositories/base.py   (BaseRepository)
+```
+</details>
+
+<details>
+<summary>Tests (7 new files, ~55 test cases)</summary>
+
+```
+epg-maf/tests/unit/test_provenance.py               (10 tests)
+epg-maf/tests/unit/test_provenance_service.py       (7 tests)
+epg-maf/tests/unit/test_authz.py                    (14 tests)
+epg-maf/tests/unit/test_repository_base.py          (7 tests)
+epg-maf/tests/integration/test_schema.py            (2 tests, Alembic lifecycle)
+epg-maf/tests/integration/test_seed_invariants.py   (4 tests, data-quality)
+epg-maf/tests/parity/test_row_counts.py             (1 test, byte-parity vs DuckDB)
+```
+</details>
+
+### 5. Files modified
+
+W01 files touched to wire the new services in — every change is additive:
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/errors.py` | Added `AccessDenied` (403). |
+| `epg-maf/src/egp_maf/config/settings.py` | Added `postgres_migrator_user`, `postgres_migrator_password`, `authz_allowlist_path`. |
+| `epg-maf/src/egp_maf/state/__init__.py` | Exports `DBProvenance` + `find_provenance_for_field`. |
+| `epg-maf/src/egp_maf/services/__init__.py` | Exports the new services + policies. |
+| `epg-maf/src/egp_maf/di/container.py` | Wires `provenance_service` + `authz_policy` (uses `Settings.authz_allowlist_path`). |
+| `epg-maf/pyproject.toml` | Adds `alembic`, `sqlalchemy`, plus `duckdb` (dev) for the seed exporter. |
+| `epg-maf/.env.example` | Adds `POSTGRES_MIGRATOR_*` and `EGP_AUTHZ_ALLOWLIST_PATH`. |
+| `epg-maf/tests/integration/conftest.py` | Adds `_build_agent_ro_conninfo()` and `_build_migrator_conninfo()` helpers. |
+| `epg-maf/tests/unit/test_di_container.py` | Updates container construction test doubles to include new services. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**Schema port**
+
+- Every one of the 10 DuckDB tables is present in Postgres with identical
+  column names, types (mechanical Postgres equivalents), and constraints.
+- CHECK constraints preserved verbatim — same 6-value `pathogenicity`, 5-value
+  `phenotype`, 4-value `risk_band`, 7-value `inheritance` vocabularies.
+- All indexes preserved.
+- `annotations_json` is `jsonb` (Postgres-native, indexable if needed later).
+- Identity columns replace explicit sequences (idiomatic Postgres).
+- After DDL, `GRANT SELECT ON ALL TABLES IN SCHEMA public TO egp_agent_ro`.
+
+**Seed pipeline**
+
+- One-shot Python script exports each of the 10 tables in FK-safe order.
+- JSON columns serialised as compact JSON (`json.dumps(..., separators=(",",":"))`).
+- `load.sql` uses `\copy` (client-side) so it works against a private-endpoint
+  Postgres without server-side file access.
+- Identity sequences reset via `setval(pg_get_serial_sequence(...))` post-load.
+
+**Alembic**
+
+- `env.py` resolves URL from `ALEMBIC_URL` (preferred) or `POSTGRES_MIGRATOR_*`
+  env vars (fallback). Never uses the application role.
+- `001_baseline_schema.py` reads `db/schema/V001__baseline.sql` and executes
+  via `connection.exec_driver_sql(...)` — no SQLAlchemy statement parsing.
+- `downgrade()` drops all 10 tables in reverse-dependency order (no CASCADE).
+
+**Provenance construction moves left**
+
+- Prototype: post-hoc `_attach_provenance` matched result rows to tool
+  outputs by domain key (fragile).
+- Target: `ProvenanceService.build(...)` called by the Repository at the
+  moment the row is read. Provenance becomes construction-time truth
+  (Design §11.7).
+- `DBProvenance` gains `trace_id`/`span_id` optional fields; `ProvenanceService`
+  accepts an `otel_context_provider` callable that will be plugged in by W08.
+
+**Authz policy**
+
+- Phase 1 v1 is a JSON allowlist file (Key Vault-mounted in prod). Structure:
+
+  ```json
+  {
+      "version": 1,
+      "clinicians": { "c1": ["P001", "P002"] },
+      "admins": ["adm1"]
+  }
+  ```
+
+- **Fail closed.** If no path is configured, everyone except the built-in
+  `system` context is denied. Missing file at startup → `ConfigurationError`.
+- Hot reload via file mtime — cheap syscall per `can_read` call.
+- Two typed exceptions: `AccessDenied` (403), `ConfigurationError` (500).
+
+**BaseRepository contract**
+
+- Every W03 domain Repository will inherit `BaseRepository` and only add SQL.
+- `_authorize(ctx, patient_id)` enforces RBAC on method entry.
+- `_fetch_all(sql, params)` returns `list[dict[str, Any]]` — same shape as
+  the prototype's tool outputs.
+- Driver errors wrapped as `DatabaseUnavailable` (503).
+
+### 7. Test coverage summary
+
+| Layer | File | Tests | Kind |
+|---|---|---:|---|
+| `DBProvenance` | `tests/unit/test_provenance.py` | 10 | unit |
+| `ProvenanceService` | `tests/unit/test_provenance_service.py` | 7 | unit |
+| `AuthzPolicy` | `tests/unit/test_authz.py` | 14 | unit |
+| `BaseRepository` | `tests/unit/test_repository_base.py` | 7 | unit |
+| Schema (Alembic upgrade/downgrade) | `tests/integration/test_schema.py` | 2 | integration (Postgres) |
+| Seed invariants | `tests/integration/test_seed_invariants.py` | 4 | integration (Postgres) |
+| Row-count parity vs DuckDB | `tests/parity/test_row_counts.py` | 1 | parity (Postgres + DuckDB) |
+| **W02 total** | | **~45** | |
+| **Programme total (W01 + W02)** | | **~133** | |
+
+Run commands:
+
+```powershell
+cd epg-maf
+pytest -m "not integration"            # unit + parity (parity row-count skips if no PG)
+$env:EGP_TEST_POSTGRES = "1"
+$env:EGP_TEST_COSMOS = "1"
+pytest -m integration                  # requires local Postgres + Cosmos
+```
+
+### 8. Validation vs. the LangGraph prototype
+
+Three parity checks land in W02:
+
+1. **Schema shape** — every DuckDB table exists in Postgres with the same
+   column names and constraints. Manually reviewed line-by-line;
+   `test_schema.py` proves the 10 tables come up cleanly.
+2. **Data quality invariants** — `test_seed_invariants.py` asserts the
+   denormalisation-drift invariant (Discovery §22 M7) plus FK coverage.
+3. **Row-count parity** — `test_row_counts.py` counts rows in every table
+   across DuckDB and Postgres; any drift fails CI.
+
+Column-level value parity is verified per Repository in W03 (specialist
+snapshots).
+
+### 9. Validation Checklist (paste into PR)
+
+**Schema port**
+
+- [ ] `pytest tests/integration/test_schema.py -v` — Alembic upgrade + downgrade both succeed.
+- [ ] Every one of the 10 expected tables is present after upgrade.
+- [ ] All 10 tables are dropped after downgrade.
+- [ ] `db/schema/V001__baseline.sql` preserves every CHECK, FK, PK, index from the prototype (line-by-line review).
+
+**Seed pipeline**
+
+- [ ] `python db/seed/export_from_duckdb.py` completes without error.
+- [ ] `psql -f db/seed/load.sql` loads every CSV without error.
+- [ ] `pytest tests/integration/test_seed_invariants.py -v` — 4 invariants all pass:
+  - [ ] Every table has ≥ 1 row.
+  - [ ] `patient_prs.disease_name` matches `prs_annotations.disease_name` for every joined row.
+  - [ ] Every `patient_variants.variant_id` has an annotation row.
+  - [ ] Every `patient_pgx_status.gene` appears in at least one `pgx_annotations` row.
+- [ ] `pytest tests/parity/test_row_counts.py -v` — row counts match DuckDB.
+
+**Alembic**
+
+- [ ] `alembic -c db/alembic/alembic.ini upgrade head` succeeds against a fresh DB.
+- [ ] `alembic downgrade base` cleanly removes everything.
+- [ ] Alembic uses `POSTGRES_MIGRATOR_*` credentials, not the app credentials.
+- [ ] Application code never imports Alembic (`git grep "import alembic" epg-maf/src` → 0 hits).
+
+**Roles**
+
+- [ ] `bootstrap/roles.sql` creates both roles idempotently.
+- [ ] `egp_agent_ro` can only SELECT (verified manually or via prod policy).
+- [ ] `egp_migrator` credentials never appear in application `Settings` at runtime (only Alembic-side).
+
+**Provenance**
+
+- [ ] `pytest tests/unit/test_provenance.py -v` — all 10 tests pass.
+- [ ] `pytest tests/unit/test_provenance_service.py -v` — all 7 tests pass.
+- [ ] `DBProvenance` is `frozen=True` and rejects extra fields.
+- [ ] Inputs to `ProvenanceService.build` are copied (mutating them does not affect the record).
+- [ ] OTEL context provider errors are swallowed silently (never fail provenance construction).
+
+**Authorization**
+
+- [ ] `pytest tests/unit/test_authz.py -v` — all 14 tests pass.
+- [ ] Missing allowlist path → deny everyone except `system`.
+- [ ] Missing allowlist file → `ConfigurationError` at policy construction.
+- [ ] Invalid JSON → `ConfigurationError`.
+- [ ] Wrong schema version → `ConfigurationError`.
+- [ ] Admin bypasses per-patient check.
+- [ ] mtime-based hot reload works (1s sleep test confirms).
+- [ ] `AccessDenied` maps to HTTP 403 with stable `error_code`.
+
+**Repository base**
+
+- [ ] `pytest tests/unit/test_repository_base.py -v` — all 7 tests pass.
+- [ ] `_authorize` delegates to `AuthzPolicy` and re-raises `AccessDenied`.
+- [ ] `_fetch_all` wraps driver errors as `DatabaseUnavailable` with `__cause__` preserved.
+- [ ] `_build_provenance` produces a valid `DBProvenance` record.
+- [ ] `BaseRepository` exposes only `_authorize`, `_fetch_all`, `_build_provenance` — no `execute` method (W03 subclasses will supply their own domain-specific methods).
+
+**DI container**
+
+- [ ] `pytest tests/unit/test_di_container.py -v` — every existing test still passes.
+- [ ] `build_container(...)` wires `provenance_service` and `authz_policy`.
+- [ ] Startup order unchanged: Cosmos → Postgres → Prompts.
+
+**PHI hygiene**
+
+- [ ] `git grep -n "search_context_notes" epg-maf/src` → 0 hits.
+- [ ] `git grep -n "affected_relative_count" epg-maf/src` → 0 hits.
+- [ ] Log emitted by `AllowlistAuthzPolicy` on denial contains only `clinician_id`, `patient_id`, `route` — no PHI.
+
+**Repository hygiene**
+
+- [ ] `git status --porcelain agents/ config/ test_data/ tests/` is empty (prototype untouched).
+- [ ] `db/seed/data/` is gitignored.
+- [ ] `.env.example` contains no real secrets — new entries are placeholders.
+
+### 10. Known follow-ups (out of scope for W02)
+
+- Domain repositories (W03) inherit from `BaseRepository` — one per specialist.
+- Deterministic `annotations_json` parser (W03) — replaces LLM parsing of the JSON blob.
+- OTEL context provider wired into `ProvenanceService` (W08).
+- Bicep templates that provision Postgres Flexible Server + reject `COSMOS_KEY` in prod (W11).
+- Real Foundry allowlist source (Phase 3 replaces the JSON file with a policy engine).
+- Load-test the pool at realistic concurrency (W10).
+- Managed-identity token refresh for long-lived Postgres connections (small follow-up).
+
+### 11. Sign-off
+
+- [ ] SA — architecture reviewer
+- [ ] DE — schema port + seed pipeline reviewer
+- [ ] BE2 — Repository base + provenance reviewer
+- [ ] SEC — allowlist + roles reviewer
 
 ---
 
@@ -651,3 +948,5 @@ Filled in when the workstream starts.
 | Date | Change | Editor |
 |---|---|---|
 | 2026-07-09 | Consolidated document created. W01 section carried over from `W01-foundation.md` (superseded); roadmap and progress dashboard added. | Delivery Lead |
+| 2026-07-09 | W02 (Clinical Data Layer) implementation complete. Section filled in; progress dashboard + diagram updated. | Delivery Lead |
+| 2026-07-09 | W02 cleanup: removed unused `IRepository` protocol; moved `OpenAuthzPolicy` / `ClosedAuthzPolicy` from `src/egp_maf/services/authz.py` to `tests/support/authz_doubles.py`. No behavioural change. Docs updated where they described removed classes. | Delivery Lead |
