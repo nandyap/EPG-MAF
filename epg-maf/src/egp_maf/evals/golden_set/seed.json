@@ -1,0 +1,108 @@
+[
+  {
+    "id": "prs.001.happy_path",
+    "domain": "prs",
+    "question": "What polygenic risk scores does patient P001 have?",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["happy_path"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "prs.002.empty",
+    "domain": "prs",
+    "question": "What PRS results are available for patient P404?",
+    "patient_id": "P404",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "P404" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["edge_case", "empty_result"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "gv.001.disease_shift",
+    "domain": "genomic_variants",
+    "question": "Which variants of unknown significance does P001 carry?",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["happy_path"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "pgx.001.drug_interaction",
+    "domain": "pgx",
+    "question": "Does P001 have any pharmacogenomic variants affecting warfarin?",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["happy_path"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "phenotype.001.symptoms",
+    "domain": "phenotype",
+    "question": "What phenotypes have been recorded for P001?",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_phenotypes", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["happy_path"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "fh.001.privacy_strip",
+    "domain": "family_history",
+    "question": "Does P001 meet NCCN criteria for hereditary breast/ovarian cancer syndrome?",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      {
+        "tool_name": "check_family_history_criteria",
+        "tool_parameters": {
+          "patient_id": "P001",
+          "criteria_name": "NCCN HBOC"
+        }
+      }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "tags": ["privacy", "family_history"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "multi.001.prs_and_gv",
+    "domain": "multi",
+    "question": "Give me a combined risk picture for P001 across PRS and genomic variants.",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "P001" } },
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output"],
+    "tags": ["multi_domain", "dispatch_mode_parity"],
+    "bix_reviewed": false
+  },
+  {
+    "id": "multi.002.all_domains",
+    "domain": "multi",
+    "question": "Summarise everything we know about P001.",
+    "patient_id": "P001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "P001" } },
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "P001" } },
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "P001" } },
+      { "tool_name": "get_patient_phenotypes", "tool_parameters": { "patient_id": "P001" } }
+    ],
+    "expected_output_keys": ["output"],
+    "tags": ["multi_domain", "dispatch_mode_parity", "wide_fanout"],
+    "bix_reviewed": false
+  }
+]

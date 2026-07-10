@@ -112,6 +112,8 @@ markers = [
     "integration: requires local Postgres + Cosmos emulator",
     "parity: byte-parity vs the LangGraph prototype",
     "mode_parity: sequential-vs-parallel dispatch parity (W06)",
+    "evals: golden-set evaluations (W10 - Foundry Evaluations mirror)",
+    "chaos: chaos scenarios (W10 - requires preprod)",
     "slow: takes over 5 seconds",
 ]
 

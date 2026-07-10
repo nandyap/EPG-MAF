@@ -49,7 +49,7 @@ Every workstream section carries the same subsections in the same order:
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ✅ Complete | 6 | BE2 + SEC | 5 + 3 + 1 bicep + 2 docs | ~1,300 | W01, W03 |
 | W08 | [Observability](#workstream-w08--observability-) | ✅ Complete | 6 | PE + BE1 | 6 + 4 (wired) / 7 + conftest + 2 docs | ~1,410 | W01, W04, W05 |
 | W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ✅ Complete | 6 | BE1 | 4 + 7 modified / 4 + 2 docs | ~1,010 | W04, W05 |
-| W10 | [Testing, Evaluation & Load](#workstream-w10--testing-evaluation--load-) | ⏳ Not started | 7 | QA | — | — | W05, W08 |
+| W10 | [Testing, Evaluation & Load](#workstream-w10--testing-evaluation--load-) | ✅ Complete | 7 | QA | 4 evals src + 3 test + 5 docs | ~710 | W05, W08 |
 | W11 | [Cutover, Release & Runbooks](#workstream-w11--cutover-release--runbooks-) | ⏳ Not started | 8 | PE + SA | — | — | All previous |
 
 ### Progress diagram
@@ -81,7 +81,8 @@ flowchart LR
     class W07 done
     class W08 done
     class W09 done
-    class W10,W11 pending
+    class W10 done
+    class W11 pending
 ```
 
 ---
@@ -2603,28 +2604,249 @@ So byte-parity isn't meaningful. What we validated instead:
 
 ---
 
-## Workstream W10 — Testing, Evaluation & Load ⏳
+## Workstream W10 — Testing, Evaluation & Load ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 7
-**Owner:** QA
-**Depends on:** W05, W08
+**Owner:** QA (implementation), BIX (golden-set curation follow-up), SA (design confirmation)
+**PR gate reviewers:** QA · SA · BIX SME
+**Files:** 4 evals-module + 8 seed items + 3 test + 5 docs + pyproject markers
+**LOC:** ~710 (source ~390 · tests ~320 · docs ~700 excluded from LOC count)
+**Depends on:** W05 (specialists produce the ToolCalls the scorer reads), W08 (`FORBIDDEN_ATTRIBUTES` for the PHI detector), W09 (`format_error_response` for the runtime hygiene check)
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Deliver the test pyramid, golden set, load tests, chaos scenarios, PHI-hygiene CI.
+Every prior workstream built the app; W10 delivers the **evaluation +
+test pyramid** that keeps it working across deploys: a golden question
+set with deterministic + LLM-as-judge scorers, a PHI-safety detector
+that complements W08's runtime guard with a CI-gate scan, and
+documentation contracts for the integration harness, load, and chaos
+scenarios.
 
-**In scope:**
+**In scope (delivered):**
 
-- Golden question set curated with BIX (30–50 items).
-- Foundry Evaluations project + deterministic and LLM-as-judge scorers.
-- Locust/k6 load scripts; baseline captured on preprod.
-- Chaos scenarios: kill-replica, DB pause, APIM 429 storm, Foundry outage.
-- PHI-hygiene CI gate (attempts to log forbidden attribute names fail CI).
+- :class:`GoldenItem` + :class:`GoldenToolCall` schemas (`extra="forbid"`)
+  and :func:`load_golden_set` — bundled seed + optional external merge,
+  duplicate-id detection, `include_bundled=False` for hermetic tests.
+- Bundled 8-item seed set covering all 5 domains + edge cases
+  (empty result, privacy strip, multi-domain, wide fanout,
+  dispatch-mode-parity).
+- :class:`ScorerResult` envelope + two scorer families:
+  - :class:`ToolCallScorer` — permutation-tolerant set match, parameter
+    superset check, `depends_on` ordering rule, `strict_extras` flag.
+  - :class:`InterpretationJudgeScorer` + :class:`InterpretationJudge`
+    Protocol + :class:`StubJudge` for tests. Foundry judge wires in W11.
+- :func:`detect_phi_in_export` + :class:`PhiScanResult` — grep-style
+  detector over :data:`FORBIDDEN_ATTRIBUTES` with a `raise_if_findings`
+  helper for CI-gate use.
+- 40 unit tests across schema validation, scorer semantics, static
+  PHI detection, and runtime hygiene over exports our code actually
+  produces (span attribute filter + error response formatter).
+- Two new pytest markers: ``evals`` (golden-set evaluations) and
+  ``chaos`` (chaos scenarios).
+- Five docs:
+  [`docs/testing/golden-set.md`](../testing/golden-set.md),
+  [`docs/testing/integration.md`](../testing/integration.md),
+  [`docs/testing/load.md`](../testing/load.md),
+  [`docs/testing/chaos.md`](../testing/chaos.md),
+  [`docs/testing/phi-safety-ci.md`](../testing/phi-safety-ci.md).
 
-### Sections 2–11
+**In scope (verified from earlier workstreams; W10 owns documentation):**
 
-Filled in when the workstream starts.
+- **F12.2** — integration harness already exists at
+  `tests/integration/` (Postgres + Cosmos gated by env vars). W10
+  documents the contract + CI job scaffold.
+- **F12.3** — repository parity harness already exists at
+  `tests/parity/test_repository_parity.py` with a `parity` marker.
+- **F12.5** load + **F12.6** chaos — runbook + acceptance-criteria
+  tables are the deliverable; scripts land against preprod in W11.
+
+**Out of scope (→ W11):**
+
+- **BIX-approved 30–50-item golden set** — the seed set is
+  scaffolding; BIX curation is a follow-up PR that flips
+  `bix_reviewed=true` per item.
+- **Foundry Evaluations wiring** — the Foundry project + real judge
+  land alongside W11 cutover. W10 ships the Protocol seam + stub.
+- **Locust `locustfile.py`** — waits on the FastAPI layer in W11.
+- **Chaos scripts** — waits on preprod in W11.
+- **GHA workflow YAMLs** (`integration.yml`, `phi.yml`) — CI/CD infra
+  is W11 territory.
+
+### 2. Mapping to the engineering plan
+
+| Plan feature | Deliverable | Where |
+|---|---|---|
+| **F12.1** Golden set — every item has question, patient, expected tool-call set, expected output shape; items tagged by domain and by dispatch-mode-relevance | :class:`GoldenItem` schema + 8-item bundled seed set | [`evals/golden.py`](../../epg-maf/src/egp_maf/evals/golden.py), [`evals/golden_set/seed.json`](../../epg-maf/src/egp_maf/evals/golden_set/seed.json) |
+| **F12.1** BIX sign-off tracking | `bix_reviewed` + `bix_reviewer` + `bix_review_date` fields (all default false/None; approvals in follow-up PRs) | [`evals/golden.py`](../../epg-maf/src/egp_maf/evals/golden.py) |
+| **F12.2** Integration harness with docker services + `pytest -m integration` runs | Already delivered; W10 documents the contract + CI scaffold | [`docs/testing/integration.md`](../testing/integration.md), [`tests/integration/`](../../epg-maf/tests/integration/) |
+| **F12.3** Repository parity harness against prototype | Already delivered in W03; W10 confirms the marker | [`tests/parity/test_repository_parity.py`](../../epg-maf/tests/parity/test_repository_parity.py) |
+| **F12.4** Foundry Evaluations integration | Scorer harness + Protocol seam shipped; Foundry project + real judge in W11 | [`evals/scorers.py`](../../epg-maf/src/egp_maf/evals/scorers.py) |
+| **F12.4** Scorer functions (deterministic + LLM-as-judge) | :class:`ToolCallScorer` (deterministic) + :class:`InterpretationJudgeScorer` + :class:`StubJudge` for tests | [`evals/scorers.py`](../../epg-maf/src/egp_maf/evals/scorers.py) |
+| **F12.5** Load scripts (Locust/k6) + baseline scenarios | Runbook + acceptance table shipped; `locustfile.py` in W11 | [`docs/testing/load.md`](../testing/load.md) |
+| **F12.6** Chaos scenarios (kill-replica, DB pause, APIM 429 storm, Foundry outage) + runbook | 5 scenarios documented (added Cosmos throttle); scripts in W11 | [`docs/testing/chaos.md`](../testing/chaos.md) |
+| **F12.7** PHI-safety CI — forbidden attribute name in exported span/log fails CI | :func:`detect_phi_in_export` + `raise_if_findings`; unit tests cover static detection + runtime hygiene over W08 span filter and W09 error formatter | [`evals/phi_detector.py`](../../epg-maf/src/egp_maf/evals/phi_detector.py), [`tests/unit/evals/test_phi_detector.py`](../../epg-maf/tests/unit/evals/test_phi_detector.py) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**Zero new MAF touch points.** W10 is entirely evaluation + tooling —
+`GoldenItem` scores against the :class:`ToolCall` records W05's
+:class:`MafSpecialistLlm` already produces from MAF `Content(type='function_call')`
++ `Content(type='function_result')` pairs. No new MAF integration.
+
+### 4. Files created
+
+<details>
+<summary>Source (4 evals-module files + seed data)</summary>
+
+```
+epg-maf/src/egp_maf/evals/__init__.py                re-exports
+epg-maf/src/egp_maf/evals/golden.py                  GoldenItem + GoldenToolCall + load_golden_set
+epg-maf/src/egp_maf/evals/scorers.py                 ToolCallScorer + InterpretationJudgeScorer + StubJudge + ScorerResult
+epg-maf/src/egp_maf/evals/phi_detector.py            detect_phi_in_export + PhiFinding + PhiScanResult
+epg-maf/src/egp_maf/evals/golden_set/__init__.py     package marker
+epg-maf/src/egp_maf/evals/golden_set/seed.json       8-item bundled seed
+```
+</details>
+
+<details>
+<summary>Tests (3 files + package marker, 40 test cases)</summary>
+
+```
+epg-maf/tests/unit/evals/__init__.py
+epg-maf/tests/unit/evals/test_golden.py              (~10 tests — bundled seed + external override + validation)
+epg-maf/tests/unit/evals/test_scorers.py             (~11 tests — deterministic + judge)
+epg-maf/tests/unit/evals/test_phi_detector.py        (~19 tests — static + runtime hygiene)
+```
+</details>
+
+<details>
+<summary>Docs (5 files)</summary>
+
+```
+docs/testing/golden-set.md                            F12.1 — item schema + loading + scoring
+docs/testing/integration.md                           F12.2 — harness contract + CI scaffold
+docs/testing/load.md                                  F12.5 — baseline + stress scenarios
+docs/testing/chaos.md                                 F12.6 — 5 scenarios + runbook conventions
+docs/testing/phi-safety-ci.md                         F12.7 — detector contract + CI wiring
+docs/walkthroughs/W10-testing-walkthrough.md
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/pyproject.toml` | +2 pytest markers: `evals`, `chaos`. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**Bundled + extensible golden set.** The seed set lives inside the
+wheel at `egp_maf/evals/golden_set/*.json`;
+:func:`load_golden_set` uses ``importlib.resources.files`` so it
+works whether installed or run from source. Callers can layer a
+private / larger set on top via ``external_path=Path(...)``.
+Duplicate ids across sources raise :class:`ValueError` — every id
+is unique end-to-end.
+
+**Shared scorer envelope.** :class:`ScorerResult` is
+``(passed, score, reason)`` — every scorer, deterministic or
+LLM-as-judge, returns the same shape. Aggregate reporting for Foundry
+Evaluations is uniform without special-casing. Adding a new scorer
+(safety, citation-correctness) means implementing one method.
+
+**LLM judge is injected, not imported.**
+:class:`InterpretationJudge` is a `@runtime_checkable` Protocol.
+:class:`StubJudge` gives unit tests deterministic behaviour; W11
+plugs a real Foundry judge without touching the harness.
+
+**Two-layer PHI defence.** W08's :func:`safe_set_attribute` is the
+*emit-time* guard: a forbidden attribute name never reaches the SDK.
+W10's :func:`detect_phi_in_export` is the *export-time* guard: a
+forbidden name that reaches an exported blob (log line, span JSON,
+response body) fails CI. The two together cover both the emit path
+and the export path — a developer who bypasses `safe_set_attribute`
+still gets caught before the artefact reaches an ops workspace.
+
+**Runtime hygiene tests cover the whole export surface.** Beyond
+static grep tests, `test_phi_detector.py::TestRuntimeHygiene` calls
+:func:`filter_safe_attributes` (W08) + :func:`format_error_response`
+(W09) with adversarial inputs and asserts the exported JSON is clean
+where it should be, and correctly flagged where a developer put a
+forbidden name in an exception message (the detector's job is to
+find leaks, not silently sanitise).
+
+**Detector scope is explicit.** :class:`DBProvenance` carries
+``source_row`` (the row body) at rest — it lives in Cosmos as the
+clinical audit record, never exported to spans or logs. The scope
+test pins this: the detector applies to exports, not to internal
+Pydantic records.
+
+### 7. Test coverage summary
+
+| Test file | Count | What it proves |
+|---|---|---|
+| `test_golden.py` | 10 | Bundled seed loads; every item validates; every domain covered; privacy tag present on family-history items; external merge works; duplicate id raises; `include_bundled=False` isolates; `extra="forbid"` on model. |
+| `test_scorers.py` | 11 | Empty expectation passes; exact match passes; missing tool fails; extras don't fail by default but do under `strict_extras`; partial match scores 0<s<1; parameter mismatch counts as missing; superset parameters allowed; `depends_on` ordering violation fails; stub judge passes on needles, fails on missing. |
+| `test_phi_detector.py` | 19 | Clean blob has no findings; every forbidden name detected (parametrised over the full set); findings carry context; `raise_if_findings` raises `AssertionError`; custom forbidden set works; regex prefers longer alternative; W08 filter output is clean; W09 error response with dev-planted forbidden name is correctly flagged; provenance record scope test. |
+| **Total new** | **40** | |
+| **Regression** | 372 unchanged | Full non-network suite: **412 passed, 21 skipped**. |
+
+### 8. Validation vs. LangGraph prototype
+
+The prototype has no golden set, no scorers, no PHI CI. Byte-parity
+isn't meaningful. What we validated instead:
+
+- **Prototype not touched.** All 330 pre-W09 tests still pass; the 42
+  W09 + 40 W10 tests are pure additions.
+- **Repository parity harness** (W03 / F12.3) already covers the
+  DuckDB comparison and is unchanged.
+- **The bundled patient P001** referenced by every seed item is a
+  real seeded patient in `test_data/clinical_genetics.duckdb` — the
+  golden set is aligned with the prototype seed so integration runs
+  can actually produce answers.
+
+### 9. Validation checklist (paste into PR)
+
+- [x] Golden-set schema: `question`, `patient_id`, `expected_tool_calls`, `expected_output_keys`, `tags`, `bix_reviewed` (F12.1)
+- [x] Items tagged by domain and by dispatch-mode-relevance (F12.1)
+- [x] Every seed item validates against the Pydantic model (F12.1)
+- [x] Duplicate id across bundled + external raises (F12.1)
+- [x] Deterministic scorer: set-similarity + parameter superset + `depends_on` ordering (F12.4)
+- [x] LLM-judge scorer: Protocol seam + `StubJudge` (F12.4)
+- [x] Every scorer returns `ScorerResult(passed, score, reason)` (F12.4)
+- [x] Integration harness gated by env vars; contract documented (F12.2)
+- [x] Repository parity harness present (F12.3 — from W03)
+- [x] Load scenarios + acceptance targets documented (F12.5)
+- [x] Chaos scenarios + expected fingerprints documented (F12.6)
+- [x] PHI detector finds every forbidden name (F12.7)
+- [x] Runtime hygiene test exercises the W08 filter + W09 formatter (F12.7)
+- [x] 40 new unit tests pass; full non-network suite 412 passed / 21 skipped
+- [x] No prototype tree (`agents/`, `config/`, `test_data/`) modified
+
+### 10. Known follow-ups (out of scope for W10)
+
+- **BIX-approved 30–50-item golden set** — the seed set is
+  scaffolding; BIX curation is a follow-up PR that flips
+  `bix_reviewed=true` per item.
+- **Foundry Evaluations wiring** — Foundry project + real judge land
+  with W11 (Cutover). W10 ships the Protocol seam + stub.
+- **Locust `locustfile.py`** — waits on the FastAPI layer in W11.
+- **Chaos scripts** — need preprod, delivered in W11.
+- **GHA workflow YAMLs** (`integration.yml`, `phi.yml`) — CI/CD
+  infra is W11 territory.
+- **Grafana perf dashboards** — same, W11.
+
+### 11. Sign-off
+
+- [ ] QA — implementation reviewer (scorer semantics + harness)
+- [ ] BIX SME — golden-set seed set approval (or a follow-up PR)
+- [ ] SA — protocol seam review (`InterpretationJudge`)
+- [ ] SEC — PHI-safety review (detector scope + forbidden set completeness)
 
 ---
 
@@ -2669,3 +2891,4 @@ Filled in when the workstream starts.
 | 2026-07-10 | W07 (Authentication & Authorization) implementation complete. Entra JWT authenticator (PyJWT + JWKS + audience/issuer/expiry + required-role) behind an :class:`Authenticator` protocol seam; :class:`StubAuthenticator` for dev/tests refuses to construct in prod; structured :class:`AuditEvent` model + `LoggingAuditSink` routed via `egp_maf.audit` logger; `AllowlistAuthzPolicy` emits `authz.granted` / `authz.denied` (backwards-compatible with W02); DI container exposes `authenticator` + `audit_emitter`; Bicep for Entra app registration + 3 app roles; `docs/security/entra.md` + `docs/security/allowlist.md`. 34 new tests; 292 total passing. | Delivery Lead |
 | 2026-07-16 | W08 (Observability) implementation complete. OTEL `TelemetryProvider` + `MeterProvider` behind a single `build_telemetry_provider(settings)` factory; :class:`SpanKind` StrEnum + 7 span context managers (`workflow_request`, `workflow_executor`, `specialist`, `tool`, `llm`, `repository`, `db`); :class:`MetricEmitter` protocol + `NullMetricEmitter` / `OtelMetricEmitter` with all 10 KPI metrics from Design §20.4; PHI-safe attribute allowlist + `FORBIDDEN_ATTRIBUTES` (family-history trio + LLM content + row body + tool result) enforced at every emit via `safe_set_attribute`; `ProvenanceService(otel_context_provider=...)` stamps `trace_id`/`span_id` from active span (non-throwing); Repository base, LLM bridge, SpecialistExecutor and DI container wired; `docs/observability/spans.md` + `docs/observability/metrics.md`. 38 new tests; 330 total passing. | Delivery Lead |
 | 2026-07-16 | W09 (Resilience & Error Handling) implementation complete. Four new typed exceptions (`UpstreamTimeout`, `RateLimitExceeded`, `LlmUnavailable`, `LlmError`) with stable HTTP mapping; :class:`RetryPolicy` + :func:`retry_async` async helper with jittered exponential backoff + injectable sleeper / RNG; :class:`RetryingSpecialistLlm` decorator composed around :class:`MafSpecialistLlm` in the registry — classifies SDK exceptions via attribute probing (no SDK imports), retries transients, emits `egp.rate_limit.hit` per 429 observation; :class:`DbPoolFactory.open` retries connect with `Settings.postgres_connect_*` policy; :class:`SpecialistExecutor.handle_dispatch` catches every exception from `SpecialistBase.run`, materialises a `status='failed'` slot, emits `egp.specialist.failed` + `egp.specialist.duration_ms`, forwards state so fan-in + subsequent iterations continue; :func:`format_error_response` transport-agnostic `{error_code, message, trace_id}` envelope. F11.4 (Cosmos ETag) + F11.6 (recursion budget) verified from W01/W04; APIM policy XML deferred to W11. 42 new tests; 372 total passing. | Delivery Lead |
+| 2026-07-16 | W10 (Testing, Evaluation & Load) implementation complete. :class:`GoldenItem` + :class:`GoldenToolCall` schemas with `extra="forbid"` and BIX-review tracking; :func:`load_golden_set` merges bundled + optional external sets via `importlib.resources`; 8-item bundled seed covering every domain + edge cases (empty, privacy, multi-domain, wide fanout, dispatch-mode-parity); :class:`ScorerResult` envelope + :class:`ToolCallScorer` (set-similarity + parameter superset + `depends_on` ordering) + :class:`InterpretationJudgeScorer` Protocol seam + :class:`StubJudge` for tests; :func:`detect_phi_in_export` grep-style CI-gate detector over :data:`FORBIDDEN_ATTRIBUTES` with `raise_if_findings` helper; runtime hygiene tests over W08 filter + W09 formatter. F12.2 integration + F12.3 parity harnesses documented (already delivered W01/W03); F12.5 load + F12.6 chaos runbooks + acceptance tables shipped (scripts in W11). 40 new tests; 412 total passing. | Delivery Lead |
