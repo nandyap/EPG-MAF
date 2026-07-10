@@ -1,0 +1,72 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# EGP Window — Business dashboard\nClinical usage overview. Data source: Application Insights `customMetrics` and `traces`.\nSee `docs/observability/metrics.md` for the metric catalogue and `docs/monitoring/queries.kusto.md` for query recipes."
+      }
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "envParam",
+            "name": "env",
+            "type": 2,
+            "isRequired": true,
+            "value": "prod",
+            "typeSettings": {"additionalResourceOptions": []},
+            "jsonData": "[\"prod\",\"preprod\",\"dev\"]"
+          },
+          {
+            "id": "windowParam",
+            "name": "window",
+            "type": 4,
+            "isRequired": true,
+            "typeSettings": {
+              "selectableValues": [
+                {"durationMs": 3600000},
+                {"durationMs": 86400000},
+                {"durationMs": 604800000}
+              ]
+            },
+            "value": {"durationMs": 86400000}
+          }
+        ]
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.turn.count\"\n| where tostring(customDimensions.env) == \"{env}\"\n| summarize turns=sum(value) by bin(timestamp, 5m)\n| render timechart",
+        "size": 1,
+        "title": "Turns per 5-minute bin",
+        "queryType": 0
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.turn.duration_ms\"\n| where tostring(customDimensions.env) == \"{env}\"\n| summarize p50=percentile(value, 50), p95=percentile(value, 95), p99=percentile(value, 99) by bin(timestamp, 5m)\n| render timechart",
+        "size": 1,
+        "title": "Turn latency percentiles",
+        "queryType": 0
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.specialist.duration_ms\"\n| where tostring(customDimensions.env) == \"{env}\"\n| summarize p95=percentile(value, 95) by domain=tostring(customDimensions.domain), bin(timestamp, 15m)\n| render timechart",
+        "size": 1,
+        "title": "Specialist p95 by domain",
+        "queryType": 0
+      }
+    }
+  ]
+}

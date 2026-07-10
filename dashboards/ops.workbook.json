@@ -1,0 +1,54 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {"json": "# EGP Window — Ops dashboard\nInfrastructure + error-budget view. Panels feed the 9 alerts in `infra/monitoring/alerts.bicep`."}
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.specialist.failed\"\n| summarize failures=sum(value) by domain=tostring(customDimensions.domain), error_class=tostring(customDimensions.error_class), bin(timestamp, 5m)\n| render timechart",
+        "size": 1,
+        "title": "Specialist failures by domain + error class"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.rate_limit.hit\"\n| summarize hits=sum(value) by upstream=tostring(customDimensions.upstream), bin(timestamp, 5m)\n| render timechart",
+        "size": 1,
+        "title": "Rate-limit hits by upstream"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.db.pool.utilisation\"\n| summarize avg_util=avg(value) by bin(timestamp, 5m)\n| render timechart",
+        "size": 1,
+        "title": "Postgres pool utilisation"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "traces\n| where isnotempty(customDimensions[\"error.code\"])\n| summarize c=count() by error_code=tostring(customDimensions[\"error.code\"]), bin(timestamp, 15m)\n| render timechart",
+        "size": 1,
+        "title": "Typed error codes over time"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "customMetrics\n| where name == \"egp.prompt.fallback\"\n| summarize fallbacks=sum(value) by bin(timestamp, 1h)\n| render timechart",
+        "size": 1,
+        "title": "Prompt-fallback rate (Foundry availability signal)"
+      }
+    }
+  ]
+}

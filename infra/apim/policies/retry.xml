@@ -1,0 +1,46 @@
+<!--
+    W11 F11.2 — APIM retry + timeout policy for the LLM upstream.
+
+    Applied on the API Management "operation" that fronts the LLM
+    endpoint (OpenAI / Compass). Retries transient failures (5xx +
+    429) up to 3 times with exponential backoff and jitter, capped by
+    a per-request timeout of 30 s.
+
+    Composed with the circuit-breaker policy in
+    ``circuit-breaker.xml`` — retry runs first; when the circuit is
+    open the retry is short-circuited and 503 is returned to the app.
+
+    Design ADR-022 + §26.
+-->
+<policies>
+    <inbound>
+        <base />
+        <!-- Per-request timeout: 30 s wall-clock cap. -->
+        <set-variable name="request-timeout-seconds" value="30" />
+    </inbound>
+    <backend>
+        <retry
+            condition="@(context.Response.StatusCode == 429 || (context.Response.StatusCode >= 500 && context.Response.StatusCode < 600))"
+            count="3"
+            interval="0.5"
+            max-interval="4"
+            delta="0.5"
+            first-fast-retry="false">
+            <forward-request timeout="@(int.Parse((string)context.Variables[&quot;request-timeout-seconds&quot;]))" />
+        </retry>
+    </backend>
+    <outbound>
+        <base />
+        <!--
+            Propagate the trace id back to the client so the app can
+            include it in the response envelope alongside the OTEL
+            trace_id (W08).
+        -->
+        <set-header name="Trace-ID" exists-action="skip">
+            <value>@(context.RequestId)</value>
+        </set-header>
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>

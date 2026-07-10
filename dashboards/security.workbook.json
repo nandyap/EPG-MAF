@@ -1,0 +1,36 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {"json": "# EGP Window — Security dashboard\nAuth outcomes, authz denials, PHI hygiene signals. Data from the `egp_maf.audit` structured-log logger + typed error codes."}
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "AppEvents\n| where Name in (\"authz.granted\", \"authz.denied\", \"auth.token_invalid\", \"auth.role_denied\")\n| summarize c=count() by Name, bin(TimeGenerated, 15m)\n| render timechart",
+        "size": 1,
+        "title": "Audit events over time"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "AppEvents\n| where Name == \"authz.denied\"\n| summarize denials=count() by clinician_id=tostring(Properties.clinician_id), bin(TimeGenerated, 1h)\n| top 20 by denials",
+        "size": 1,
+        "title": "Top 20 clinicians by authz.denied (rate anomaly candidates)"
+      }
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "AppEvents\n| where Name == \"auth.token_invalid\"\n| summarize c=count() by reason=tostring(Properties.reason), bin(TimeGenerated, 15m)\n| render timechart",
+        "size": 1,
+        "title": "auth.token_invalid by reason"
+      }
+    }
+  ]
+}

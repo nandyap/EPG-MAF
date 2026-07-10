@@ -1,0 +1,34 @@
+<!--
+    W11 F11.2 — APIM circuit-breaker for the LLM upstream.
+
+    Opens after 5 failures within a 30 s window; half-open probe every
+    30 s. When open, requests short-circuit with HTTP 503 so the app's
+    in-process retry (W09) doesn't compound the load.
+
+    Applied at the "backend" scope on the OpenAI / Compass backend
+    definition. Composed with ``retry.xml`` (retry policy wraps the
+    forward-request call).
+
+    Design ADR-022 + §26.
+-->
+<backend id="egp-llm-backend">
+    <url>@(context.Variables.GetValueOrDefault("llm-backend-url", "https://api.openai.com"))</url>
+    <circuit-breaker>
+        <rule name="egp-llm-cb">
+            <failure-condition
+                count="5"
+                interval="00:00:30"
+                percentage="50">
+                <status-code-ranges>
+                    <status-code-range from="500" to="599" />
+                    <status-code-range from="429" to="429" />
+                </status-code-ranges>
+                <error-reasons>
+                    <error-reason>Timeout</error-reason>
+                    <error-reason>ServerProtocolViolation</error-reason>
+                </error-reasons>
+            </failure-condition>
+            <trip-duration>00:00:30</trip-duration>
+        </rule>
+    </circuit-breaker>
+</backend>

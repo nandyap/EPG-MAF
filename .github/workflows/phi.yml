@@ -1,0 +1,47 @@
+name: phi-safety
+on:
+  pull_request:
+    paths:
+      - "epg-maf/**"
+      - ".github/workflows/phi.yml"
+  push:
+    branches: [main]
+
+jobs:
+  phi-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LLM_API_KEY: test-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        working-directory: epg-maf
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Unit + evals + runtime hygiene
+        working-directory: epg-maf
+        run: python -m pytest tests/unit/evals -q
+      - name: Grep the source tree for forbidden attribute names
+        working-directory: epg-maf
+        run: |
+          python -c "
+          import re, sys, pathlib
+          from egp_maf.telemetry.attributes import FORBIDDEN_ATTRIBUTES
+          pattern = re.compile(r'set_attribute\(\s*[\'\"](' + '|'.join(re.escape(n) for n in FORBIDDEN_ATTRIBUTES) + r')[\'\"]')
+          bad = []
+          for path in pathlib.Path('src').rglob('*.py'):
+              text = path.read_text(encoding='utf-8')
+              for m in pattern.finditer(text):
+                  bad.append(f'{path}: forbidden set_attribute({m.group(1)!r})')
+          if bad:
+              print('PHI-safety CI: forbidden set_attribute call detected')
+              for b in bad:
+                  print(' -', b)
+              sys.exit(1)
+          "

@@ -35,6 +35,14 @@ dependencies = [
 
     # Env file support
     "python-dotenv>=1.0.1,<2",
+
+    # FastAPI HTTP layer (W11)
+    "fastapi>=0.115.0,<1",
+    "uvicorn[standard]>=0.32.0,<1",
+
+    # OpenTelemetry SDK (W08)
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-sdk>=1.28.0",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +55,9 @@ dev = [
     "mypy>=1.11.0",
     "black>=24.10.0",
     "types-python-dateutil",
+
+    # HTTP client for TestClient-driven FastAPI tests (W11)
+    "httpx>=0.27.0",
 
     # Seed-exporter uses DuckDB to read the prototype snapshot.
     "duckdb>=1.3.0,<2",
