@@ -91,3 +91,48 @@ class SpecialistFailed(EgpError):
 
     error_code = "specialist_failed"
     http_status = 500
+
+
+# ── W09: Upstream & LLM transients ─────────────────────────────────
+
+
+class UpstreamTimeout(EgpError):
+    """Raised when an upstream (LLM, Compass, JWKS, prompts) call times out.
+
+    A transient class — the retry policy treats this as retryable up to
+    the configured attempt cap.
+    """
+
+    error_code = "upstream_timeout"
+    http_status = 504
+
+
+class RateLimitExceeded(EgpError):
+    """Raised when an upstream returns HTTP 429.
+
+    The LLM-retry policy retries on this with jittered backoff; final
+    failure surfaces as HTTP 429 to the caller so APIM / Front Door can
+    apply their own retry-after logic.
+    """
+
+    error_code = "rate_limit_exceeded"
+    http_status = 429
+
+
+class LlmUnavailable(EgpError):
+    """Raised when the LLM upstream cannot service a request (5xx after
+    retry exhaustion, connection refused, DNS failure)."""
+
+    error_code = "llm_unavailable"
+    http_status = 503
+
+
+class LlmError(EgpError):
+    """Raised for terminal LLM errors that are NOT retryable (4xx other
+    than 429, malformed responses, schema-validation failures).
+
+    Distinct from :class:`LlmUnavailable` so retry policies can classify
+    correctly (this one is *not* retryable)."""
+
+    error_code = "llm_error"
+    http_status = 502

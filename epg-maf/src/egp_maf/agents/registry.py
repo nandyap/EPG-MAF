@@ -19,6 +19,7 @@ from egp_maf.agents.pgx import PGXSpecialist
 from egp_maf.agents.phenotype import PhenotypeSpecialist
 from egp_maf.agents.prs import PRSSpecialist
 from egp_maf.config.llm_config import AGENT_LLM_CONFIGS
+from egp_maf.config.settings import Settings
 from egp_maf.errors import ConfigurationError
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.services.prompt_service import PromptService
@@ -30,6 +31,7 @@ from egp_maf.services.repositories import (
     PhenotypeRepository,
     PRSRepository,
 )
+from egp_maf.telemetry.metrics import MetricEmitter, NullMetricEmitter
 
 
 @dataclass
@@ -77,22 +79,55 @@ def build_specialist_registry(
     prompt_service: PromptService,
     provenance_service: ProvenanceService,
     llm_overrides: Mapping[str, SpecialistLlm] | None = None,
+    settings: Settings | None = None,
+    metric_emitter: MetricEmitter | None = None,
 ) -> SpecialistRegistry:
     """Wire the 5 specialists with real MAF-backed LLM bridges by default.
 
     ``llm_overrides`` lets callers (tests, W06 preview scenarios) inject
     stubs per specialist by name.
+
+    W09 — when ``settings`` is provided, real MAF-backed LLMs are wrapped
+    with :class:`RetryingSpecialistLlm` using
+    :func:`default_llm_retry_policy` seeded from
+    ``settings.llm_retry_*``. Test doubles injected via ``llm_overrides``
+    are not wrapped (tests want deterministic behaviour).
     """
     llm_overrides = dict(llm_overrides or {})
     registry = SpecialistRegistry()
+    metrics: MetricEmitter = metric_emitter or NullMetricEmitter()
+
+    # Lazy import to avoid a circular import chain:
+    #     egp_maf.agents.__init__ → registry → resilience.llm_retry
+    #     → agents.base → agents.__init__.
+    from egp_maf.resilience.llm_retry import (
+        RetryingSpecialistLlm,
+        default_llm_retry_policy,
+    )
+
+    if settings is not None:
+        retry_policy = default_llm_retry_policy(
+            max_attempts=settings.llm_retry_max_attempts,
+            base_delay_ms=settings.llm_retry_base_delay_ms,
+            max_delay_ms=settings.llm_retry_max_delay_ms,
+            jitter=settings.llm_retry_jitter,
+        )
+    else:
+        retry_policy = default_llm_retry_policy()
 
     def _llm_for(name: str) -> SpecialistLlm:
         if name in llm_overrides:
             return llm_overrides[name]
-        return MafSpecialistLlm(
+        inner = MafSpecialistLlm(
             client=llm_client_factory.get(name),
             agent_id=f"specialist_{name}",
             temperature=AGENT_LLM_CONFIGS[name].temperature,
+        )
+        return RetryingSpecialistLlm(
+            inner,
+            policy=retry_policy,
+            metric_emitter=metrics,
+            upstream_label=f"llm.{name}",
         )
 
     def _prompt(name: str) -> str:

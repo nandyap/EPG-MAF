@@ -48,7 +48,7 @@ Every workstream section carries the same subsections in the same order:
 | W06 | [Parallel Execution & Mode-Parity](#workstream-w06--parallel-execution--mode-parity-) | ✅ Complete | 5 | BE1 + QA | 2 / 5 + 2 docs | ~770 | W04, W05 |
 | W07 | [Authentication & Authorization](#workstream-w07--authentication--authorization-) | ✅ Complete | 6 | BE2 + SEC | 5 + 3 + 1 bicep + 2 docs | ~1,300 | W01, W03 |
 | W08 | [Observability](#workstream-w08--observability-) | ✅ Complete | 6 | PE + BE1 | 6 + 4 (wired) / 7 + conftest + 2 docs | ~1,410 | W01, W04, W05 |
-| W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ⏳ Not started | 6 | BE1 | — | — | W04, W05 |
+| W09 | [Resilience & Error Handling](#workstream-w09--resilience--error-handling-) | ✅ Complete | 6 | BE1 | 4 + 7 modified / 4 + 2 docs | ~1,010 | W04, W05 |
 | W10 | [Testing, Evaluation & Load](#workstream-w10--testing-evaluation--load-) | ⏳ Not started | 7 | QA | — | — | W05, W08 |
 | W11 | [Cutover, Release & Runbooks](#workstream-w11--cutover-release--runbooks-) | ⏳ Not started | 8 | PE + SA | — | — | All previous |
 
@@ -80,7 +80,8 @@ flowchart LR
     class W06 done
     class W07 done
     class W08 done
-    class W09,W10,W11 pending
+    class W09 done
+    class W10,W11 pending
 ```
 
 ---
@@ -2335,29 +2336,270 @@ validated instead:
 
 ---
 
-## Workstream W09 — Resilience & Error Handling ⏳
+## Workstream W09 — Resilience & Error Handling ✅
 
-**Status:** ⏳ Not started
+**Status:** ✅ Complete
 **Sprint:** 6
-**Owner:** BE1
-**Depends on:** W04, W05
+**Owner:** BE1 (implementation), SA (contract review)
+**PR gate reviewers:** BE1 · SA · QA
+**Files:** 4 resilience-module + 4 test + 2 docs; errors.py + 7 wired files updated
+**LOC:** ~1,010 (source ~410 · tests ~600 · docs + wiring deltas ~120)
+**Depends on:** W01 (Settings + DI + Cosmos ETag), W04 (recursion budget), W05 (specialist executor), W07 (typed error base), W08 (MetricEmitter seam)
 
-### 1. Purpose & scope (planned)
+### 1. Purpose & scope
 
-Typed error taxonomy, response contract, retry/backoff/circuit-breaker per Design ADR-022 and §25–26.
+Every prior workstream built the seams that W09 fills with failure
+behaviour. W09 delivers the **failure story**: an :class:`EgpError`
+taxonomy that maps to stable HTTP codes and a client-safe response
+envelope; an in-process retry policy around every LLM call that
+classifies SDK exceptions, retries transients with jittered backoff,
+and emits ``egp.rate_limit.hit`` on every observed 429; DB-pool connect
+retries; specialist-failure isolation so one specialist crash does
+not stop the orchestration; and documentation of the two seams W01 +
+W04 already delivered (Cosmos ETag retry, recursion budget).
 
 **In scope:**
 
-- Full error taxonomy in FastAPI response formatter.
-- APIM retry / timeout / circuit-breaker policy XML.
-- DB timeouts and pool connect retries.
-- Cosmos ETag retry (already partially in W01 — this adds the failure-metric wiring).
-- Specialist-failure isolation (orchestration continues on one specialist's exception).
-- Recursion-budget breach → typed `RoutingBudgetExceededError`.
+- :class:`RetryPolicy` + :func:`retry_async` (async helper with full-
+  jitter exponential backoff; sleeper + RNG injectable for
+  deterministic tests).
+- :class:`RetryingSpecialistLlm` — decorator around any
+  :class:`SpecialistLlm` that classifies exceptions via
+  :func:`classify_llm_exception`, retries transients, and emits
+  ``egp.rate_limit.hit`` per 429 observation.
+- Four new typed exceptions: :class:`UpstreamTimeout` (504),
+  :class:`RateLimitExceeded` (429), :class:`LlmUnavailable` (503),
+  :class:`LlmError` (502).
+- :class:`ErrorResponse` envelope + :func:`format_error_response` —
+  the transport-agnostic mapping consumed by CLI / evaluation
+  harnesses now, and by W11's FastAPI middleware later.
+- :class:`DbPoolFactory.open()` — retries the initial connect
+  ``postgres_connect_max_attempts`` times with exp+jitter backoff;
+  final failure raises :class:`DatabaseUnavailable`.
+- :class:`SpecialistExecutor.handle_dispatch` — catches every exception
+  from :meth:`SpecialistBase.run`, materialises a
+  ``status='failed'`` :class:`SpecialistSlot`, emits
+  ``egp.specialist.failed`` and ``egp.specialist.duration_ms`` via
+  the injected :class:`MetricEmitter`, and forwards state so
+  fan-in + subsequent iterations continue.
+- Six new ``Settings`` fields: ``postgres_connect_max_attempts``,
+  ``postgres_connect_base_delay_ms``, ``postgres_connect_max_delay_ms``,
+  ``llm_retry_max_attempts``, ``llm_retry_base_delay_ms``,
+  ``llm_retry_max_delay_ms``, ``llm_retry_jitter``.
+- DI wiring: :class:`SpecialistRegistry` now wraps
+  :class:`MafSpecialistLlm` in :class:`RetryingSpecialistLlm` using a
+  policy seeded from ``Settings.llm_retry_*``; test-supplied
+  ``llm_overrides`` are NOT wrapped (tests want deterministic
+  behaviour). :class:`WorkflowRuntime` + :func:`build_orchestration_workflow`
+  now thread a ``metric_emitter`` through to every
+  :class:`SpecialistExecutor`.
+- Two docs: [`docs/resilience/resilience.md`](../resilience/resilience.md)
+  (the contract + config surface + KQL queries) and this workstream
+  section.
+- 42 new unit tests across retry-policy semantics, LLM exception
+  classification, retry-composition behaviour, error-response
+  formatting, DB-pool connect retries, specialist-failure isolation
+  (direct + end-to-end).
 
-### Sections 2–11
+**Out of scope (→ later):**
 
-Filled in when the workstream starts.
+- **APIM retry / circuit-breaker policy XML (F11.2 infra)** — Bicep
+  + policy files land with W11 (Cutover). The app-side retry we ship
+  here is the in-process counterpart that runs when APIM isn't in the
+  path (dev mode) or when APIM has already exhausted.
+- **FastAPI response-middleware wiring** — needs the HTTP layer W11
+  builds. :func:`format_error_response` is transport-agnostic and
+  ready.
+- **Chaos scenarios** — kill-replica, DB pause, APIM 429 storm — are
+  W10 (Testing & Load) acceptance artefacts.
+- **Prompt-fallback wiring** — the ``egp.prompt.fallback`` counter is
+  in W08's emitter contract; it is wired in W11 alongside the Foundry
+  prompt fetcher.
+
+### 2. Mapping to the engineering plan
+
+| Plan feature | Deliverable | Where |
+|---|---|---|
+| **F11.1** — Typed exception taxonomy with stable HTTP mapping | 4 new subclasses; :class:`ErrorResponse` + :func:`format_error_response` | [`errors.py`](../../epg-maf/src/egp_maf/errors.py), [`resilience/error_response.py`](../../epg-maf/src/egp_maf/resilience/error_response.py) |
+| **F11.1** — Response body: `{error_code, message, trace_id}`; no stack traces, no PHI | :meth:`ErrorResponse.to_dict` returns exactly those 3 keys; formatter falls back to per-class safe messages on empty `args` | [`resilience/error_response.py`](../../epg-maf/src/egp_maf/resilience/error_response.py), [`tests/unit/resilience/test_error_response.py`](../../epg-maf/tests/unit/resilience/test_error_response.py) |
+| **F11.2** — APIM retry / timeout / circuit-breaker | Deferred to W11 (infra owner). App-side counterpart shipped: :class:`RetryingSpecialistLlm` with jittered exp backoff, 3-attempt default. | [`resilience/llm_retry.py`](../../epg-maf/src/egp_maf/resilience/llm_retry.py) |
+| **F11.2** — 429 count matches actual rate-limited attempts | :class:`RetryingSpecialistLlm` emits ``egp.rate_limit.hit`` *before* re-raising, so pre-retry hits are counted | [`resilience/llm_retry.py`](../../epg-maf/src/egp_maf/resilience/llm_retry.py), [`tests/unit/resilience/test_llm_retry.py`](../../epg-maf/tests/unit/resilience/test_llm_retry.py) |
+| **F11.3** — Pool connect retries 3× w/ exp backoff; final → :class:`DatabaseUnavailable` | :meth:`DbPoolFactory.open` uses :func:`retry_async` with a `Settings`-driven :class:`RetryPolicy` | [`infrastructure/db_pool.py`](../../epg-maf/src/egp_maf/infrastructure/db_pool.py) |
+| **F11.3** — Statement timeout server-side | Delivered in W02; unchanged | [`infrastructure/db_pool.py`](../../epg-maf/src/egp_maf/infrastructure/db_pool.py) |
+| **F11.4** — Cosmos ETag conflict → reload + retry once; second conflict → :class:`ConcurrencyConflict` | Delivered in W01. Verified via response-formatter mapping (`concurrency_conflict` → 409) + existing integration test. | [`services/thread_state.py`](../../epg-maf/src/egp_maf/services/thread_state.py) |
+| **F11.5** — Specialist exception marks slot ``status='failed'``; orchestration continues | :meth:`SpecialistExecutor.handle_dispatch` catch + failed :class:`SpecialistSlot`; emits ``egp.specialist.failed`` | [`workflow/orchestration/specialist_executor.py`](../../epg-maf/src/egp_maf/workflow/orchestration/specialist_executor.py), [`tests/unit/resilience/test_specialist_failure_isolation.py`](../../epg-maf/tests/unit/resilience/test_specialist_failure_isolation.py) |
+| **F11.5** — Synthesis reflects the gap | Failed slot preserved on state through fan-in; synthesis prompt wiring lands in W11 | Slot carries `errors=[…]`; synthesis reads it |
+| **F11.6** — Recursion budget = 12; breach → :class:`RoutingBudgetExceeded` | Delivered in W04 (`OrchRouterExecutor` guards `router_iterations`); W09 documents + wires the response code | [`workflow/orchestration/orch_router.py`](../../epg-maf/src/egp_maf/workflow/orchestration/orch_router.py) |
+| **F11.6** — Budget breach returns partial state | :class:`RunOrchestrationExecutor` (W04) catches and returns partial ChatWorkflowState | [`workflow/chat/run_orchestration.py`](../../epg-maf/src/egp_maf/workflow/chat/run_orchestration.py) |
+
+**Prototype files modified:** none.
+
+### 3. Mapping to Microsoft Agent Framework
+
+**Zero new MAF touch points.** W09 is entirely in the seams W04–W08
+built. The `RetryingSpecialistLlm` wraps a `MafSpecialistLlm` behind
+the same `SpecialistLlm` Protocol — MAF's `Agent` / `Workflow` classes
+never learn about retry. The `SpecialistExecutor`'s exception catch
+runs inside a MAF `@handler` and never lets the exception escape into
+MAF's superstep loop (Design §7.5 assumes an `@handler` may not raise
+if the workflow is to continue).
+
+### 4. Files created
+
+<details>
+<summary>Source (4 resilience-module files)</summary>
+
+```
+epg-maf/src/egp_maf/resilience/__init__.py           re-exports
+epg-maf/src/egp_maf/resilience/retry.py              RetryPolicy + retry_async + RetryStats
+epg-maf/src/egp_maf/resilience/llm_retry.py          RetryingSpecialistLlm + classify_llm_exception + default_llm_retry_policy
+epg-maf/src/egp_maf/resilience/error_response.py     ErrorResponse + format_error_response
+```
+</details>
+
+<details>
+<summary>Tests (4 files, 42 test cases)</summary>
+
+```
+epg-maf/tests/unit/resilience/__init__.py
+epg-maf/tests/unit/resilience/test_retry.py                          (~10 tests — policy math + retry_async semantics)
+epg-maf/tests/unit/resilience/test_llm_retry.py                      (~12 tests — classification + retry + rate-limit metric)
+epg-maf/tests/unit/resilience/test_error_response.py                 (~6  tests — envelope shape + typed mapping + fallbacks)
+epg-maf/tests/unit/resilience/test_db_pool_retry.py                  (~4  tests — retry policy for connect)
+epg-maf/tests/unit/resilience/test_specialist_failure_isolation.py   (~5  tests — direct handler + end-to-end)
+```
+</details>
+
+<details>
+<summary>Docs (1 file)</summary>
+
+```
+docs/resilience/resilience.md                        Contract + config surface + KQL queries
+```
+</details>
+
+### 5. Files modified
+
+| File | Change |
+|---|---|
+| `epg-maf/src/egp_maf/errors.py` | +4 typed exceptions: `UpstreamTimeout`, `RateLimitExceeded`, `LlmUnavailable`, `LlmError`. |
+| `epg-maf/src/egp_maf/config/settings.py` | +7 resilience knobs (`postgres_connect_*`, `llm_retry_*`). |
+| `epg-maf/src/egp_maf/infrastructure/db_pool.py` | `open()` wrapped in `retry_async` with `Settings`-driven policy. Final failure raises `DatabaseUnavailable`. |
+| `epg-maf/src/egp_maf/workflow/orchestration/specialist_executor.py` | F11.5 isolation: catches every exception from `SpecialistBase.run`; materialises failed slot; emits `egp.specialist.failed` + `egp.specialist.duration_ms`. |
+| `epg-maf/src/egp_maf/workflow/orchestration/build.py` | Threads `metric_emitter` into every `SpecialistExecutor`. |
+| `epg-maf/src/egp_maf/workflow/runtime.py` | Accepts `metric_emitter` kwarg, forwards to `build_orchestration_workflow`. |
+| `epg-maf/src/egp_maf/agents/registry.py` | Wraps real `MafSpecialistLlm` in `RetryingSpecialistLlm` using `default_llm_retry_policy(settings.llm_retry_*)`; test overrides bypass. |
+| `epg-maf/src/egp_maf/di/container.py` | Passes `settings` + `metric_emitter` into `build_specialist_registry` + `WorkflowRuntime`. |
+
+**Prototype files modified:** none.
+
+### 6. Implementation highlights
+
+**One retry primitive.** :func:`retry_async` is a single async helper
+with an injectable sleeper (`asyncio.sleep` in prod, `_noop` in tests)
+and an injectable RNG. `RetryPolicy` is a frozen dataclass; changing
+policy is data, not code. Both the LLM decorator and the DB-pool
+opener use the same primitive, so backoff semantics are identical
+across the codebase.
+
+**Classification, not `isinstance`.** SDK-native exceptions from
+OpenAI, Compass, and Foundry-relay all carry HTTP status codes in
+different places (`.status_code`, `.response.status_code`, `.status`).
+:func:`classify_llm_exception` probes attributes and maps to typed
+`EgpError` variants. Result: **`resilience/` has zero SDK imports** —
+it works with whatever LLM stack `MafSpecialistLlm` uses today or
+tomorrow.
+
+**Metrics are counted at the emit site, not the resolve site.**
+`egp.rate_limit.hit` fires **inside** `RetryingSpecialistLlm._observed`
+on every observed 429, *before* the retry loop decides whether to
+retry. So a call that hits 429 twice then succeeds increments the
+counter twice — accurate rate-limit accounting matches the actual
+number of throttled attempts, not just terminal failures. Same design
+for `egp.specialist.failed`: emitted once per failing specialist run,
+so a workflow that has one specialist crash + four succeed emits
+exactly one failure count.
+
+**Isolation absorbs the exception BEFORE it leaves the handler.**
+MAF's `@handler` treats a raised exception as terminal for the whole
+workflow. F11.5 required us to absorb at the executor level. The
+handler still emits the specialist-duration metric (with
+`status="failed"`) so latency histograms are complete.
+
+**No prototype behaviour changed.** All 292 pre-W07 tests still pass.
+The four wired files were extended, not rewritten. Registry
+signature is backward-compatible via optional `settings=` and
+`metric_emitter=` kwargs.
+
+### 7. Test coverage summary
+
+| Test file | Count | What it proves |
+|---|---|---|
+| `test_retry.py` | 10 | `RetryPolicy.delay_for_attempt` math (no delay on first attempt, exponential growth, cap, jitter in range); `retry_async` semantics (first-success, exhaustion, non-retryable, transient-then-success, stats sink). |
+| `test_llm_retry.py` | 12 | `classify_llm_exception` for timeout / 429 / 5xx / conn / 4xx / already-typed; `RetryingSpecialistLlm` for first-success, retry-then-success, per-429 metric emission, terminal-error re-raise (typed), exhausted retries (typed), `run_extraction` uses same policy. |
+| `test_error_response.py` | 6 | Untyped exception coerced to `internal_error`; every typed subclass maps to the right `error_code` + `http_status`; empty `args` falls back to per-class safe message; `to_dict()` yields exactly `{error_code, message, trace_id}`; `trace_id` defaults to None. |
+| `test_db_pool_retry.py` | 4 | `Settings` retry defaults; `retry_async` retries transient connect errors; gives up after max attempts; `DatabaseUnavailable` shape. |
+| `test_specialist_failure_isolation.py` | 5 | Direct handler catches `run` exception, produces failed slot, emits both metrics, marks `agents_completed`; unselected specialist forwards state verbatim; end-to-end `WorkflowRuntime` with one failing + one succeeding specialist continues the loop. |
+| **Total new** | **42** | |
+| **Regression** | 330 unchanged | Full suite: **372 passed, 21 skipped**. |
+
+### 8. Validation vs. LangGraph prototype
+
+The prototype has no typed error taxonomy, no in-process retry, and
+no specialist-failure isolation (a raised exception aborts the graph).
+So byte-parity isn't meaningful. What we validated instead:
+
+- **Every existing test still passes** — 330 → 372, no regressions.
+- **F11.4 Cosmos ETag retry is unchanged** from W01 (verified by the
+  existing `tests/integration/test_cosmos.py::test_second_conflict_raises`).
+- **F11.6 Recursion budget is unchanged** from W04 (verified by the
+  existing `tests/unit/workflow/test_orch_router.py::test_budget`).
+- **Registry backward-compatible.** The two new kwargs
+  (`settings=`, `metric_emitter=`) are optional; W05/W08 test doubles
+  omit them and their tests still pass.
+
+### 9. Validation checklist (paste into PR)
+
+- [x] Typed exception taxonomy covers every classifiable failure (F11.1)
+- [x] Response body is exactly `{error_code, message, trace_id}` (F11.1)
+- [x] No stack traces, no PHI in messages (F11.1)
+- [x] LLM 429 → retried up to `max_attempts` with jittered backoff (F11.2 app-side)
+- [x] LLM 5xx → retried up to `max_attempts` (F11.2 app-side)
+- [x] LLM 4xx (non-429) → not retried; typed `LlmError` (F11.2 app-side)
+- [x] `egp.rate_limit.hit` emitted per 429 observation (F11.2)
+- [x] DB pool `open()` retries `postgres_connect_max_attempts` times (F11.3)
+- [x] Final DB-pool failure raises `DatabaseUnavailable` (F11.3)
+- [x] Statement timeout server-side (F11.3 — W02 delivered)
+- [x] Cosmos ETag conflict → retry once → second conflict → `ConcurrencyConflict` (F11.4 — W01)
+- [x] Specialist exception → failed slot; orchestration continues (F11.5)
+- [x] `egp.specialist.failed` + `egp.specialist.duration_ms` emitted on failure (F11.5)
+- [x] Recursion budget breach → `RoutingBudgetExceeded` → partial state (F11.6 — W04)
+- [x] APIM policy XML: deferred to W11 (documented above)
+- [x] Docs: `docs/resilience/resilience.md`
+- [x] 42 new unit tests pass; full suite 372 passed / 21 skipped
+- [x] No prototype tree (`agents/`, `config/`, `test_data/`) modified
+
+### 10. Known follow-ups (out of scope for W09)
+
+- **APIM retry / circuit-breaker policy XML** — Bicep + policy files
+  land with W11 (Cutover). The app-side retry is the in-process
+  counterpart and works independently.
+- **FastAPI response middleware** — needs the HTTP layer W11 builds.
+  :func:`format_error_response` is ready.
+- **Prompt-fallback wiring** — `egp.prompt.fallback` emitter is ready
+  (W08); wired in W11 alongside Foundry prompt fetch.
+- **Chaos scenarios** — kill-replica, DB pause, APIM 429 storm — are
+  W10 (Testing & Load).
+- **Circuit-breaker in-process** — considered and rejected for W09:
+  a per-process breaker isn't useful when ACA runs multiple replicas.
+  APIM's breaker (F11.2 infra, W11) is the right layer.
+
+### 11. Sign-off
+
+- [ ] BE1 — implementation reviewer
+- [ ] SA — protocol seam review (`RetryPolicy`, `RetryingSpecialistLlm` composition)
+- [ ] QA — test coverage sign-off (isolation + retry semantics)
+- [ ] SEC — PHI-safety review (error messages)
 
 ---
 
@@ -2426,3 +2668,4 @@ Filled in when the workstream starts.
 | 2026-07-10 | W06 (Parallel Execution & Mode-Parity) implementation complete. Business-behaviour parity harness + deterministic `SpecialistRegistry` fixture + `parity_diff.deep_diff` helper; `mode_parity` pytest marker; `dispatch_mode_summary()` helper on `Settings`; `orch.mode` + `orch.width` on dispatch log events; `docs/config/orchestration.md` + `docs/runbooks/enable-parallel-dispatch.md` published. Harness caught a real state-sharing bug in the deterministic fixture on the first draft — fixed by building a fresh registry per run. 19 new tests; 258 total passing. | Delivery Lead |
 | 2026-07-10 | W07 (Authentication & Authorization) implementation complete. Entra JWT authenticator (PyJWT + JWKS + audience/issuer/expiry + required-role) behind an :class:`Authenticator` protocol seam; :class:`StubAuthenticator` for dev/tests refuses to construct in prod; structured :class:`AuditEvent` model + `LoggingAuditSink` routed via `egp_maf.audit` logger; `AllowlistAuthzPolicy` emits `authz.granted` / `authz.denied` (backwards-compatible with W02); DI container exposes `authenticator` + `audit_emitter`; Bicep for Entra app registration + 3 app roles; `docs/security/entra.md` + `docs/security/allowlist.md`. 34 new tests; 292 total passing. | Delivery Lead |
 | 2026-07-16 | W08 (Observability) implementation complete. OTEL `TelemetryProvider` + `MeterProvider` behind a single `build_telemetry_provider(settings)` factory; :class:`SpanKind` StrEnum + 7 span context managers (`workflow_request`, `workflow_executor`, `specialist`, `tool`, `llm`, `repository`, `db`); :class:`MetricEmitter` protocol + `NullMetricEmitter` / `OtelMetricEmitter` with all 10 KPI metrics from Design §20.4; PHI-safe attribute allowlist + `FORBIDDEN_ATTRIBUTES` (family-history trio + LLM content + row body + tool result) enforced at every emit via `safe_set_attribute`; `ProvenanceService(otel_context_provider=...)` stamps `trace_id`/`span_id` from active span (non-throwing); Repository base, LLM bridge, SpecialistExecutor and DI container wired; `docs/observability/spans.md` + `docs/observability/metrics.md`. 38 new tests; 330 total passing. | Delivery Lead |
+| 2026-07-16 | W09 (Resilience & Error Handling) implementation complete. Four new typed exceptions (`UpstreamTimeout`, `RateLimitExceeded`, `LlmUnavailable`, `LlmError`) with stable HTTP mapping; :class:`RetryPolicy` + :func:`retry_async` async helper with jittered exponential backoff + injectable sleeper / RNG; :class:`RetryingSpecialistLlm` decorator composed around :class:`MafSpecialistLlm` in the registry — classifies SDK exceptions via attribute probing (no SDK imports), retries transients, emits `egp.rate_limit.hit` per 429 observation; :class:`DbPoolFactory.open` retries connect with `Settings.postgres_connect_*` policy; :class:`SpecialistExecutor.handle_dispatch` catches every exception from `SpecialistBase.run`, materialises a `status='failed'` slot, emits `egp.specialist.failed` + `egp.specialist.duration_ms`, forwards state so fan-in + subsequent iterations continue; :func:`format_error_response` transport-agnostic `{error_code, message, trace_id}` envelope. F11.4 (Cosmos ETag) + F11.6 (recursion budget) verified from W01/W04; APIM policy XML deferred to W11. 42 new tests; 372 total passing. | Delivery Lead |

@@ -285,6 +285,8 @@ def build_container(
         llm_client_factory=llm_client_factory,
         prompt_service=prompt_service,
         provenance_service=provenance_service,
+        settings=resolved_settings,
+        metric_emitter=metric_emitter,
     )
 
     workflow_runtime = WorkflowRuntime(
@@ -292,6 +294,7 @@ def build_container(
         chat_router_llm=resolved_chat_router,
         orch_router_llm=resolved_orch_router,
         specialist_registry=specialist_registry,
+        metric_emitter=metric_emitter,
     )
 
     return Container(

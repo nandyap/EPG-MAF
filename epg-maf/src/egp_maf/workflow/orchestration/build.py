@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, get_args
 from agent_framework import Executor, Workflow, WorkflowBuilder
 
 from egp_maf.config.settings import Settings
+from egp_maf.telemetry.metrics import MetricEmitter, NullMetricEmitter
 from egp_maf.workflow.decisions import SpecialistName
 from egp_maf.workflow.orchestration.dispatcher import (
     SpecialistDispatcherExecutor,
@@ -54,6 +55,7 @@ def build_orchestration_workflow(
     router_llm: OrchRouterLlm,
     settings: Settings,
     specialist_registry: "SpecialistRegistry | None" = None,
+    metric_emitter: MetricEmitter | None = None,
 ) -> Workflow:
     """Assemble the orchestration sub-workflow.
 
@@ -63,10 +65,16 @@ def build_orchestration_workflow(
     pairs. When omitted (or when the registry is missing a specialist),
     the position falls back to :class:`SpecialistPlaceholderExecutor` —
     which keeps W04-era tests and cheap smoke runs working.
+
+    W09 — ``metric_emitter`` (F11.5) is threaded into every
+    :class:`SpecialistExecutor` so a failed specialist emits
+    ``egp.specialist.failed``. Defaults to
+    :class:`NullMetricEmitter` for tests that don't wire telemetry.
     """
     orch_router = OrchRouterExecutor(router_llm=router_llm, settings=settings)
     dispatcher = SpecialistDispatcherExecutor()
     joiner = SpecialistJoinerExecutor()
+    metrics = metric_emitter or NullMetricEmitter()
     specialists: list[Executor] = []
     for name in get_args(SpecialistName):
         if specialist_registry is not None and name in specialist_registry.specialists:
@@ -74,6 +82,7 @@ def build_orchestration_workflow(
                 SpecialistExecutor(
                     specialist=specialist_registry.specialists[name],
                     llm=specialist_registry.get_llm(name),
+                    metric_emitter=metrics,
                 )
             )
         else:

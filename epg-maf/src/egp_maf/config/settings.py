@@ -78,6 +78,17 @@ class Settings(BaseSettings):
         default=30, alias="POSTGRES_STATEMENT_TIMEOUT_SECONDS", ge=1, le=600
     )
 
+    # W09 — pool connect retry (F11.3). Attempts include the first try.
+    postgres_connect_max_attempts: int = Field(
+        default=3, alias="POSTGRES_CONNECT_MAX_ATTEMPTS", ge=1, le=10
+    )
+    postgres_connect_base_delay_ms: int = Field(
+        default=250, alias="POSTGRES_CONNECT_BASE_DELAY_MS", ge=0, le=10_000
+    )
+    postgres_connect_max_delay_ms: int = Field(
+        default=4_000, alias="POSTGRES_CONNECT_MAX_DELAY_MS", ge=0, le=30_000
+    )
+
     # Migrator role (Alembic / CI only — never used by the runtime app).
     postgres_migrator_user: str | None = Field(default=None, alias="POSTGRES_MIGRATOR_USER")
     postgres_migrator_password: SecretStr | None = Field(
@@ -135,6 +146,24 @@ class Settings(BaseSettings):
     )
     auth_stub_enabled: bool = Field(default=False, alias="EGP_AUTH_STUB_ENABLED")
     auth_required_role: str = Field(default="Clinician", alias="EGP_AUTH_REQUIRED_ROLE")
+
+    # ── Resilience (W09) ───────────────────────────────────────────
+    # In-process retry wrapping around the LLM bridge. APIM's retry
+    # policy is the outer layer; these apply when we call the LLM
+    # directly (dev mode) or when APIM has already exhausted its own
+    # retries. Design ADR-022 / §26.
+    llm_retry_max_attempts: int = Field(
+        default=3, alias="LLM_RETRY_MAX_ATTEMPTS", ge=1, le=10
+    )
+    llm_retry_base_delay_ms: int = Field(
+        default=250, alias="LLM_RETRY_BASE_DELAY_MS", ge=0, le=10_000
+    )
+    llm_retry_max_delay_ms: int = Field(
+        default=4_000, alias="LLM_RETRY_MAX_DELAY_MS", ge=0, le=30_000
+    )
+    llm_retry_jitter: float = Field(
+        default=0.5, alias="LLM_RETRY_JITTER", ge=0.0, le=1.0
+    )
 
     # ── Pydantic-settings config ───────────────────────────────────
     model_config = SettingsConfigDict(

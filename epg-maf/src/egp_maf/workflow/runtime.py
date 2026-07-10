@@ -17,6 +17,7 @@ from agent_framework import Workflow
 
 from egp_maf.config.settings import Settings
 from egp_maf.logging.setup import get_logger
+from egp_maf.telemetry.metrics import MetricEmitter, NullMetricEmitter
 from egp_maf.workflow.chat.build import build_chat_workflow
 from egp_maf.workflow.chat.synthesize_response import (
     StubSynthesisLlm,
@@ -43,12 +44,14 @@ class WorkflowRuntime:
         orch_router_llm: OrchRouterLlm,
         synthesis_llm: SynthesisLlm | None = None,
         specialist_registry: "SpecialistRegistry | None" = None,
+        metric_emitter: MetricEmitter | None = None,
     ) -> None:
         self._settings = settings
         self._orchestration_workflow: Workflow = build_orchestration_workflow(
             router_llm=orch_router_llm,
             settings=settings,
             specialist_registry=specialist_registry,
+            metric_emitter=metric_emitter or NullMetricEmitter(),
         )
         self._chat_workflow: Workflow = build_chat_workflow(
             router_llm=chat_router_llm,

@@ -64,7 +64,12 @@ class DbPoolFactory:
 
     # ── Lifecycle ────────────────────────────────────────────────────
     async def open(self) -> None:
-        """Open the pool. Idempotent."""
+        """Open the pool. Idempotent.
+
+        Retries the initial connect ``postgres_connect_max_attempts``
+        times with jittered exponential backoff (F11.3 — Design §26).
+        Final failure surfaces as :class:`DatabaseUnavailable`.
+        """
         if self._pool is not None:
             return
 
@@ -72,21 +77,37 @@ class DbPoolFactory:
         # psycopg installed with the C extension.
         from psycopg_pool import AsyncConnectionPool  # type: ignore[import-untyped]
 
+        # Local import — resilience module is optional at collection
+        # time and avoids a top-of-module cycle with settings.
+        from egp_maf.resilience.retry import RetryPolicy, retry_async
+
         conninfo = self._build_conninfo()
-        self._pool = AsyncConnectionPool(
-            conninfo=conninfo,
-            min_size=self._settings.postgres_pool_min_size,
-            max_size=self._settings.postgres_pool_max_size,
-            timeout=self._settings.postgres_pool_timeout_seconds,
-            open=False,
-            configure=self._configure_connection,
+
+        async def _open_once() -> "AsyncConnectionPool":
+            pool = AsyncConnectionPool(
+                conninfo=conninfo,
+                min_size=self._settings.postgres_pool_min_size,
+                max_size=self._settings.postgres_pool_max_size,
+                timeout=self._settings.postgres_pool_timeout_seconds,
+                open=False,
+                configure=self._configure_connection,
+            )
+            await pool.open(wait=True, timeout=10.0)
+            return pool
+
+        policy = RetryPolicy(
+            max_attempts=self._settings.postgres_connect_max_attempts,
+            base_delay_ms=self._settings.postgres_connect_base_delay_ms,
+            max_delay_ms=self._settings.postgres_connect_max_delay_ms,
+            retryable=lambda _exc: True,  # any connect error is retryable
         )
         try:
-            await self._pool.open(wait=True, timeout=10.0)
+            self._pool = await retry_async(policy, _open_once)
         except Exception as exc:  # pragma: no cover — exercised in integration
             _logger.error("db.pool.open_failed", exc_info=exc)
             raise DatabaseUnavailable(
-                f"Failed to open Postgres pool for {self._settings.postgres_host}"
+                f"Failed to open Postgres pool for {self._settings.postgres_host} "
+                f"after {self._settings.postgres_connect_max_attempts} attempts"
             ) from exc
 
     async def close(self) -> None:
