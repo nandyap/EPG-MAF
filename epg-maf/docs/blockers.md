@@ -10,7 +10,7 @@ Status legend: **OPEN** = awaiting answer · **ANSWERED** = resolved, see notes 
 
 ## B-001 — PRS "EGP-evaluated" metadata model
 
-**Status:** OPEN
+**Status:** ANSWERED (2026-07-17, Donal)
 **Owners (customer side):** BIX (data curation) · M42 (product/architecture)
 **Blocks:** Golden-dataset items S1, S2, S3, S4, R1, R4, R5 · Gap 3 in the
 scope-guardrail work · any PRS interpretation prompt change that depends on
@@ -87,11 +87,49 @@ requires the agent to:
   `PRSResult`, or PRS prompts to reference `evaluated_in_egp` or
   similar until this blocker is resolved.
 
+### Answer (2026-07-17, Donal)
+
+> "Evaluation - This information is stored in the annotation table for
+> each modality. For example in the PRS annotation table there are
+> columns such as `notes` — the evaluation details etc will be stored
+> there as free text."
+
+### Implications for implementation
+
+- **No schema change.** `prs_annotations.notes` is the source of truth
+  for evaluation status; same pattern for `variant_annotations`,
+  `pgx_annotations`, `kinship_history_annotations`.
+- The `_NOEVAL` suffix is **not** a stable contract — do not key logic
+  off the `prs_name` string.
+- Gap 3 becomes **prompt-only** work: the specialist prompt must
+  instruct the LLM to read the `notes` field and:
+  1. If `notes` indicates the PRS has not been evaluated in the EGP
+     cohort, begin the interpretation with the standard disclosure and
+     do **not** apply EGP-specific risk stratification.
+  2. If `notes` cites cohort-specific predictive accuracy or risk
+     figures, quote them grounded in the note text.
+- The interpretation quality now depends on the freshness and
+  precision of the `notes` free-text — a data-curation concern owned
+  by BIX, not a schema concern owned by us.
+- **Follow-up (not blocking):** if free-text drift becomes a scorer
+  problem, we can propose an optional structured column later.
+
+### Next actions on our side
+
+- Update `PRSAnnotation` model (already surfaces `notes`) — no change.
+- Extend [`prs_agent.txt`](../src/egp_maf/prompts/data/prs_agent.txt)
+  with a "Disclosure grounded in `notes`" section (Gap 3 becomes
+  unblocked).
+- Add golden items S4, R5 with scorer that checks the interpretation
+  references `notes`.
+- Same pattern reused for genomic variants, PGx, family history
+  disclosures.
+
 ---
 
 ## B-002 — Identity & session-scope model (patient portal vs. clinician workspace)
 
-**Status:** OPEN
+**Status:** ANSWERED (2026-07-17, Donal)
 **Owners (customer side):** M42 (product/security) · Platform/IAM
 **Blocks:** Gap 1 (single-patient scope guardrail) design finalisation ·
 `SessionDocument.patient_id` semantics · `AllowlistAuthzPolicy` scope ·
@@ -145,11 +183,44 @@ equals session `patient_id`.
 - Use golden-set wording verbatim ("log out and log back in") in the
   refusal template pending confirmation.
 
+### Answer (2026-07-17, Donal)
+
+> "Closer to point B. We have a patient id as part of the input schema.
+> This fixes the patient id for the chat and cannot be changed during
+> the session by the clinician, otherwise patient info could get mixed
+> up in a single chat history. While the clinician may not need to log
+> out to switch patient, it should start a new chat session."
+
+### Implications for implementation
+
+- **Model B confirmed** — clinician logs in, `patient_id` is fixed for
+  the lifetime of a *chat/thread*, not the lifetime of the auth session.
+- Switching patient does **not** require a full logout — it requires a
+  **new `thread_id`** (a new chat) pinned to the new `patient_id`.
+- The refusal wording should therefore be softened from "log out and
+  log back in" to something like **"Start a new chat for patient X"**
+  (subject to B-004 sign-off).
+- The chat-history retrieval must be filtered by `patient_id` so
+  resuming a thread only shows messages for that same patient.
+- `body.patient_id` must equal `session/thread.patient_id`. Mismatch
+  → 409 (`ThreadPatientMismatch`; renamed from `SessionPatientMismatch`
+  since the pin lives on the thread, not the auth session).
+
+### Next actions on our side
+
+- Rename `SessionPatientMismatch` → `ThreadPatientMismatch` in the
+  design docs (no code exists yet).
+- The API check compares `body.patient_id` against
+  `thread.patient_id` (looked up from Cosmos by `thread_id`).
+- If a new `thread_id` is used, that becomes the pin — no equality
+  check required.
+- Refusal template drafts to be revised (see B-004).
+
 ---
 
 ## B-003 — Patient identifier formats & cross-patient detection surface
 
-**Status:** OPEN
+**Status:** ANSWERED (2026-07-17, Donal)
 **Owners (customer side):** BIX (data) · M42 (product)
 **Blocks:** `ScopeGuard` regex ruleset · false-positive/false-negative
 rate of the deterministic guard · golden-set item G4 (subtle references).
@@ -197,6 +268,36 @@ inside natural prose, not only as bare tokens.
   substring that looks numeric-and-uppercase but does not match any
   known pattern — so we can measure the gap on real traffic.
 
+### Answer (2026-07-17, Donal)
+
+> "The synthetic data is based around open source genomic samples. For
+> our real data in the first iteration we will have ids with `PGP` as a
+> prefix. We may change our ids based on collaboration down the line but
+> for now we will stick with `PGP`. No names, no government document
+> numbers etc are available from our side."
+
+### Implications for implementation
+
+- **Production namespace: `PGP`** (with digits — exact width TBD, but
+  a `PGP\d+` word-boundary regex is safe).
+- **Synthetic / test namespaces:** `HG\d{5}`, `NA\d{5}` (1000 Genomes)
+  — keep for the golden dataset scorers.
+- **Names / MRN / government IDs are out of scope** — no PII lookup
+  required at guard time. Removes the PHI-in-logs risk we flagged in
+  question 2.
+- False-positive tolerance not explicitly answered — we will keep the
+  word-boundary anchoring recommendation.
+
+### Next actions on our side
+
+- `ScopeGuard` regex ruleset:
+  - `\bPGP\d+\b` (prod)
+  - `\bHG\d{5}\b`, `\bNA\d{5}\b` (test)
+- Emit `scope.guard.miss` telemetry as originally planned.
+- Add a config setting `SCOPE_GUARD_ID_PATTERNS` so patterns are
+  configurable per environment without a code change (in case the
+  namespace evolves).
+
 ---
 
 ## B-004 — Refusal message wording & channel
@@ -242,7 +343,7 @@ refusal reason so the scorers can assert on it deterministically.
 
 ## B-005 — Session lifecycle & explicit logout contract
 
-**Status:** OPEN
+**Status:** PARTIALLY ANSWERED (2026-07-17, Donal)
 **Owners (customer side):** M42 (platform) · Frontend/UI team
 **Blocks:** Meaningfulness of the "log out and log back in" refusal —
 requires an actual logout mechanism · session TTL default (currently
@@ -281,6 +382,40 @@ demand, the refusal is misleading.
 - Do **not** implement a `/session/close` endpoint until confirmed.
 - Leave TTL at the current default; note it in the runbook as
   "pending B-005".
+
+### Answer (2026-07-17, Donal)
+
+> "A patient switch to change to a new chat and make a different set of
+> old chats available to resume (i.e. those match to that patient ID)?
+> We want to avoid info from different patients being in the same
+> chat/session."
+
+### Implications for implementation
+
+- **No explicit `/logout` endpoint needed.** Patient switching is a
+  **new chat / new `thread_id`**, not a logout.
+- **Chat history is patient-scoped.** When a clinician switches
+  patients, they see the chat threads that belong to the new patient
+  (not all their chats).
+- The refusal wording must be updated — "log out and log back in" is
+  wrong. Correct phrasing is closer to **"Start a new chat for patient
+  {target_id}"** or **"Switch to a chat for patient {target_id}"**.
+  Awaiting B-004 for final wording.
+
+### Still open
+
+- **Cosmos session TTL** — the current 7-day default was set for a
+  session-based model. With thread-based pinning (many threads per
+  clinician-day), the right TTL for chat threads is likely different
+  (probably longer, since threads are resumable). Needs a data-point
+  from the UX team about typical resume horizons.
+
+### Next actions on our side
+
+- Rename design references: `SessionDocument` → `ThreadDocument` (or
+  keep name and clarify semantics in comments).
+- Add `patient_id` to the thread-list query filter in Cosmos.
+- Draft refusal wording in the "new chat" style (see B-004).
 
 ---
 
