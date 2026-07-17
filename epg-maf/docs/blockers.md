@@ -683,4 +683,117 @@ the question of **where the file's contents come from in production**.
 
 ---
 
+## B-008 — Landing-zone intake for Azure deployment
+
+**Status:** OPEN
+**Owners (customer side):** M42 (platform/IAM) · Azure landing-zone owners
+**Blocks:** Writing `infra/main.bicep` with real target values ·
+first end-to-end deployment · `azd up` workflow · APIM policy
+attachment · Postgres migration + seed against the real database.
+**Raised:** 2026-07-17
+
+### Background
+
+We have adopted an **"azd + Bicep, deploy INTO existing infrastructure"**
+pattern. The template only creates a **User-Assigned Managed Identity**,
+**Container Apps for backend + frontend**, **RBAC role assignments** on
+existing resources, and any per-app data plane objects (Cosmos database /
+containers, Postgres schema).
+
+Everything else (Container Registry, Container Apps Environment,
+Postgres Flexible Server, Cosmos DB account, Key Vault, App
+Configuration, APIM, Log Analytics workspace, VNet + subnets + private
+DNS zones) is assumed to **already exist** in the customer's landing
+zone.
+
+That's the right shape for a corporate Azure environment — but we
+cannot write the template until M42 gives us the target resource names,
+locations, and network layout.
+
+### Questions — landing-zone intake
+
+**Subscription & scope**
+
+1. Subscription ID for **dev / preprod / prod**.
+2. Region choice per environment (e.g. `uaenorth`, `swedencentral`).
+3. Resource-group name(s) — is there one RG per environment or a
+   shared one?
+4. Environment / naming conventions (e.g. `rg-{proj}-{env}-{region}-01`).
+5. Tag policy (mandatory tag keys + expected values).
+
+**Existing resources we will reference**
+
+6. Container Registry — name, resource group.
+7. Container Apps Environment — name, resource group, **VNet mode
+   (internal-only or external)**, default domain, workload profile
+   (Consumption? Dedicated?).
+8. Postgres Flexible Server — name, hostname, admin user provisioning
+   flow (do we get a password, or Managed Identity / AAD-only?),
+   backup/HA topology, private-endpoint status.
+9. Cosmos DB account — name, consistency level, geo-redundancy status.
+10. Key Vault — name, RBAC vs. access-policy model, whether we can
+    request new secrets or only read existing ones.
+11. App Configuration — name (optional; skip if not used in prod).
+12. APIM instance — name, gateway URL, product/API path prefix, backend
+    URL registration mechanism. Are our retry.xml / circuit-breaker.xml
+    applied at the API level or Operation level?
+13. Log Analytics workspace — name; is Application Insights connected?
+14. Private DNS zones for the private endpoints (`privatelink.postgres.database.azure.com`
+    etc.) — do they already exist in the landing-zone hub, or must we
+    create/link them?
+
+**Identity & RBAC**
+
+15. Can we create a **User-Assigned Managed Identity** for the app, or
+    must we reuse an existing one?
+16. Which existing RBAC roles is landing-zone owner willing to grant
+    the app MI (default set: AcrPull, Storage Blob Data Owner,
+    Key Vault Secrets User, Cosmos DB Built-in Data Contributor, Log
+    Analytics Contributor)?
+17. Entra tenant ID + expected audience / issuer for the JWT
+    verifier — needed to switch off `EGP_AUTH_STUB_ENABLED`.
+18. AD group → app role mapping (which Entra group corresponds to the
+    `Clinician` role required by W07?).
+
+**CI/CD**
+
+19. GitHub OIDC federated credential setup — do you already have a
+    federated identity credential we can reuse, or must we create a
+    new one? Which repo / branch / environment triggers count as
+    trusted?
+20. Deployment-approver group in the GitHub `prod` environment.
+
+**Operations**
+
+21. Alerting webhook URLs (Teams / email distribution list) for the 9
+    alert rules in `infra/monitoring/alerts.bicep`.
+22. Preferred `azd env` names per environment.
+
+### Impact if unresolved
+
+- We can continue writing the code and the *shape* of the Bicep
+  template using placeholder param names, but we **cannot deploy**.
+- Every deferred decision above is a `TODO` in a `main.parameters.json`
+  we would otherwise ship.
+
+### What we will do in the meantime
+
+- Draft `infra/main.bicep` + modules with **placeholder param values**
+  matching the shape agreed above (managed identity + 2 container apps
+  + RBAC + Cosmos containers + Postgres role bootstrap).
+- Draft `docs/deployment.md` as a landing-zone-agnostic guide (uses
+  `{ACR_NAME}`, `{CAE_NAME}`, `{POSTGRES_HOST}` etc.).
+- Update the W11 cutover runbook with the intake checklist so the
+  landing-zone conversation is a repeatable exercise.
+
+### Deferral option
+
+If M42 answers **only the pilot dev environment** first, we can ship a
+working `dev.bicepparam` and defer preprod/prod. Splitting the intake
+across pilots is a reasonable trade-off — preprod values can arrive
+later without changing template shape.
+
+---
+
+
 
