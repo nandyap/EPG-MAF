@@ -456,47 +456,67 @@ We will build a **ChatGPT-style clinician UI** where:
    `patient_id` and the last message timestamp. Familiar UX; zero
    training cost.
 2. **New chat = patient-ID modal.** Clinician clicks "+ New chat" →
-   modal appears with a **dropdown/autocomplete restricted to the
-   clinician's allow-listed patients** (not free-text). On selection,
-   `POST /threads` creates the `ThreadDocument` with
-   `patient_id` pinned server-side; the sidebar entry appears.
+   modal appears with a **single text input** for the patient ID
+   (client-side regex hint for `PGP\d+`, purely UX). On submit,
+   `POST /threads` validates server-side and creates the thread pinned
+   to that `patient_id`.
 3. **Chat message input** does not need a patient-ID picker — the
    thread already knows.
 4. **Resume** an old chat simply reopens the pinned thread; the
    backend enforces `body.patient_id == thread.patient_id` on every
    `POST /chat`.
 
+Autocomplete / dropdown / EHR-launch are **deferred** — see
+"Follow-up UX" below.
+
 ### Backend endpoints required (delta from what's shipped)
 
 | Endpoint | Purpose | Auth |
 |---|---|---|
-| `POST /threads` | Create a chat pinned to a patient; body = `{"patient_id": "..."}`. Server validates: patient exists (404 else); clinician is allow-listed (403 else); returns `{"thread_id": "..."}`. | Bearer JWT |
+| `POST /threads` | Create a chat pinned to a patient; body = `{"patient_id": "..."}`. Server validates: patient exists **and** clinician is allow-listed. Success → `{"thread_id": "..."}`. | Bearer JWT |
 | `GET /threads?patient_id=X` | List clinician's threads for a specific patient (for the sidebar). Optional query params for pagination. | Bearer JWT |
-| `GET /patients?query=` | Autocomplete for the patient-ID modal; returns intersection of `LIKE`-match and clinician allowlist. | Bearer JWT |
 | `POST /chat` | Existing endpoint. Behaviour change: server looks up `thread_id → patient_id` from Cosmos and enforces `body.patient_id == thread.patient_id`; mismatch = 409 `ThreadPatientMismatch`. | Bearer JWT |
+
+**Not shipped now:** `GET /patients?query=` (autocomplete) — additive,
+non-breaking, can be added later without touching `POST /threads`.
 
 ### Locked-down design points
 
-- **Patient-ID modal is a validated dropdown**, not free text — removes
-  a whole class of typos, unauthorised-access attempts, and regex
-  false-positives (B-003 becomes almost trivial).
-- **Server-side validation on `POST /threads`:**
-  - Patient does not exist → **404** with `{"error_code": "patient_not_found"}`
-  - Clinician not allow-listed → **403** with `{"error_code": "access_denied"}`
-  - Success → **200** with `{"thread_id": ...}`
+- **Free-text patient-ID input** with server-side validation on
+  `POST /threads`. Simpler than autocomplete, keeps the surface small,
+  matches the current pilot scale (< 100 patients per clinician).
+- **Identical 4xx response** for "patient does not exist" and
+  "clinician not authorised" to prevent enumeration by timing or
+  response-code inspection. Body:
+  `{"error_code": "patient_unavailable", "message": "Patient PGP001 is not available for this session."}`
+  — HTTP status **404** in both cases. Server logs the underlying
+  reason (`patient_not_found` vs. `access_denied`) for the audit trail.
 - **No `/logout` endpoint.** Patient switching is a new thread. Auth
   session terminates via the client dropping the Entra token (standard).
 - **Cosmos TTL for threads:** left at 7 days as an interim default;
   can be raised to 30 or 90 days once UX confirms typical resume
   horizons. Not blocking.
 
+### Follow-up UX (deferred, not blocking)
+
+Two enhancements to revisit once the pilot is running:
+
+1. **Autocomplete dropdown** (`GET /patients?query=`) — filters
+   `LIKE %query%` intersected with the clinician's allowlist. Better
+   UX for larger cohorts; purely additive.
+2. **EHR deep-link launch** — SMART-on-FHIR style, EHR launches the
+   chat with `patient_id` in the URL. Removes the modal entirely; the
+   right long-term answer for a clinical setting.
+
+Both are **safe to add later without breaking the current contract** —
+`POST /threads` stays the source of truth for pinning.
+
 ### Next actions on our side (implementation slice)
 
-- New endpoints (thin — thread creation is 5 lines, list is 10):
-  `POST /threads`, `GET /threads`, `GET /patients` in
-  `src/egp_maf/api/threads.py`.
+- New endpoints:
+  `POST /threads`, `GET /threads` in `src/egp_maf/api/threads.py`.
 - New Pydantic models: `ThreadCreateRequest`, `ThreadCreateResponse`,
-  `ThreadListItem`, `PatientAutocompleteItem`.
+  `ThreadListItem`.
 - `POST /chat` behaviour: add `thread_patient_id = await
   thread_state.get_patient_id(thread_id)`; raise
   `ThreadPatientMismatch(409)` if it differs from `body.patient_id`.
@@ -504,6 +524,9 @@ We will build a **ChatGPT-style clinician UI** where:
   is never mutated after that.
 - ScopeGuard simplifies: the "authenticated patient" for regex
   comparison is now unambiguously the thread's `patient_id`.
+- **Where the allowlist comes from** is tracked as **B-007** — see
+  below. Interim: reuse the existing JSON-file allowlist policy
+  (`EGP_AUTHZ_ALLOWLIST_PATH`) shipped in W07.
 
 ---
 
@@ -568,4 +591,96 @@ Until then:
   alerts in W11.
 
 ---
+
+## B-007 — Production source of the clinician→patient allowlist
+
+**Status:** OPEN
+**Owners (customer side):** M42 (platform/IAM) · EHR integration team
+**Blocks:** Production deployment of `AllowlistAuthzPolicy` · UX
+polish (autocomplete / EHR-launch) in B-005 follow-up · realistic
+smoke / load tests against Azure.
+**Raised:** 2026-07-17
+
+### Background
+
+W07 shipped a JSON-file-backed `AllowlistAuthzPolicy`
+([`src/egp_maf/services/authz.py`](../src/egp_maf/services/authz.py)):
+
+- **Config:** `EGP_AUTHZ_ALLOWLIST_PATH` env var points at a JSON file.
+- **Format (v1):**
+  ```json
+  {
+    "version": 1,
+    "clinicians": {
+      "clinician-alice": ["PGP001", "PGP002"],
+      "clinician-bob":   ["PGP003"]
+    },
+    "admins": ["admin-root"]
+  }
+  ```
+- **Loader:** the file is parsed at container-build time and hot-reloaded
+  when its mtime changes.
+- **What ships today:** the code + tests. **No actual allowlist file is
+  populated** — dev/tests use `OpenAuthzPolicy` (allows all); the smoke
+  server uses a stub clinician with no allowlist.
+
+The design is intentionally decoupled from the clinical database:
+authorization data lives in a file (or a mounted secret), not in
+Postgres or DuckDB. This is a good security posture but leaves open
+the question of **where the file's contents come from in production**.
+
+### Questions
+
+1. **Authoritative source of the mapping.** Which of the following
+   should the customer own?
+   - **(a) Manual JSON file** maintained by IT (fine for pilot with
+     < 100 clinician-patient pairs; cheapest).
+   - **(b) Entra ID group membership** — each patient has an AD
+     security group; clinicians are added to the groups they can see.
+     JWT carries group claims; policy checks group membership at
+     request time (no file, no sync).
+   - **(c) Nightly sync from the EHR** to the JSON file (e.g. a
+     scheduled job that queries the EHR's care-team endpoint and
+     rewrites the file).
+   - **(d) Real-time lookup against an EHR API** (SMART-on-FHIR
+     "care team" resource; changes the policy type to non-JSON).
+2. **Update cadence.** How often does the mapping change? (Daily?
+   Weekly? Realtime as patients are assigned?)
+3. **Emergency access.** Is there a "break-glass" scenario where a
+   clinician must access a patient they're not normally allow-listed
+   for (e.g. after-hours emergency)? If yes, what's the auditable
+   flow?
+4. **Bootstrapping the pilot.** For the initial pilot (< 100 patients,
+   handful of clinicians), a manual JSON file is fine. Please confirm
+   this is acceptable while (1) is decided.
+
+### Impact if unresolved
+
+- We can deploy `AllowlistAuthzPolicy` in preprod with a
+  hand-maintained JSON file for the pilot.
+- We **cannot** finalise the production data-flow: if (b) or (d) is
+  chosen we would eventually swap the policy implementation (the
+  `AuthzPolicy` Protocol makes this a small change, but the connector
+  is new).
+- The autocomplete follow-up in B-005 is trivial with (a) or (b) —
+  the allowlist is already in memory — but would need extra caching
+  with (c) or (d).
+
+### What we will do in the meantime
+
+- Ship the JSON-file `AllowlistAuthzPolicy` unchanged. For the pilot
+  we produce a hand-curated file with the specific patient IDs the
+  demo/pilot clinicians should see.
+- Add a **seed allowlist file** for the smoke server / demo:
+  `epg-maf/scripts/seed_allowlist.json` — small, hand-crafted, only
+  used by the stub authenticator.
+- Continue to hide the shape of the allowlist behind the
+  `AuthzPolicy` Protocol so options (b)/(c)/(d) remain a
+  swap-a-class-in-DI change, not a rewrite.
+- Do **not** add `GET /patients?query=` autocomplete until the source
+  question is answered — otherwise we would design against a moving
+  target.
+
+---
+
 
