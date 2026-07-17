@@ -302,7 +302,7 @@ inside natural prose, not only as bare tokens.
 
 ## B-004 — Refusal message wording & channel
 
-**Status:** OPEN
+**Status:** ANSWERED (2026-07-17, product decision — Vijay)
 **Owners (customer side):** M42 (product/UX) · Clinical safety
 **Blocks:** Exact `ScopeGuard` refusal template · golden-set assertion
 strings.
@@ -339,11 +339,42 @@ refusal reason so the scorers can assert on it deterministically.
 - Golden-set scorers assert on substring matches only, not full-string
   equality, until wording is signed off.
 
+### Resolution (2026-07-17, product decision by Vijay)
+
+Approved templates (interpolated with `session_patient_id` for
+deterministic scorer assertions):
+
+| Trigger | Template |
+|---|---|
+| Cross-patient reference (G1, G4) | "This chat is for patient `{session_patient_id}`. To ask about another patient, please start a new chat." |
+| Cohort scan of patient records (G2, G3, G5, R23, R24) | "I can only report on patient `{session_patient_id}` — I can't scan across other patients. Would you like me to report `{session_patient_id}`'s own findings instead?" |
+| Annotation-missing fallback (G8, G9) | "That information isn't available in our reference annotations. I won't fall back to scanning patient records to compute it." |
+
+Additional decisions:
+- **UX affordance:** the refusal reply is **pure text** for now — the
+  UI knows the current `patient_id` from the chat sidebar and does not
+  need a server-provided deep-link (see B-005).
+- **Language:** English only for the pilot. No regulated / GxP wording
+  requirements at this stage.
+
+Wording marked "provisional — Vijay" in code comments and eval scorers
+so it is easy to swap when clinical safety / M42 UX signs off formally.
+
+### Next actions on our side
+
+- Add the three templates as constants in
+  `src/egp_maf/security/refusal_templates.py`.
+- Golden-set scorer asserts substring match on the *invariant* parts
+  ("this chat is for patient", "please start a new chat", "I can only
+  report on", "isn't available in our reference annotations").
+- Do **not** hard-code full-string equality — leaves room for
+  wordsmithing later.
+
 ---
 
 ## B-005 — Session lifecycle & explicit logout contract
 
-**Status:** PARTIALLY ANSWERED (2026-07-17, Donal)
+**Status:** ANSWERED (2026-07-17, product decision — Vijay + Donal)
 **Owners (customer side):** M42 (platform) · Frontend/UI team
 **Blocks:** Meaningfulness of the "log out and log back in" refusal —
 requires an actual logout mechanism · session TTL default (currently
@@ -417,11 +448,68 @@ demand, the refusal is misleading.
 - Add `patient_id` to the thread-list query filter in Cosmos.
 - Draft refusal wording in the "new chat" style (see B-004).
 
+### UI + backend design decision (2026-07-17, Vijay)
+
+We will build a **ChatGPT-style clinician UI** where:
+
+1. **Sidebar of chat threads.** Each entry shows the pinned
+   `patient_id` and the last message timestamp. Familiar UX; zero
+   training cost.
+2. **New chat = patient-ID modal.** Clinician clicks "+ New chat" →
+   modal appears with a **dropdown/autocomplete restricted to the
+   clinician's allow-listed patients** (not free-text). On selection,
+   `POST /threads` creates the `ThreadDocument` with
+   `patient_id` pinned server-side; the sidebar entry appears.
+3. **Chat message input** does not need a patient-ID picker — the
+   thread already knows.
+4. **Resume** an old chat simply reopens the pinned thread; the
+   backend enforces `body.patient_id == thread.patient_id` on every
+   `POST /chat`.
+
+### Backend endpoints required (delta from what's shipped)
+
+| Endpoint | Purpose | Auth |
+|---|---|---|
+| `POST /threads` | Create a chat pinned to a patient; body = `{"patient_id": "..."}`. Server validates: patient exists (404 else); clinician is allow-listed (403 else); returns `{"thread_id": "..."}`. | Bearer JWT |
+| `GET /threads?patient_id=X` | List clinician's threads for a specific patient (for the sidebar). Optional query params for pagination. | Bearer JWT |
+| `GET /patients?query=` | Autocomplete for the patient-ID modal; returns intersection of `LIKE`-match and clinician allowlist. | Bearer JWT |
+| `POST /chat` | Existing endpoint. Behaviour change: server looks up `thread_id → patient_id` from Cosmos and enforces `body.patient_id == thread.patient_id`; mismatch = 409 `ThreadPatientMismatch`. | Bearer JWT |
+
+### Locked-down design points
+
+- **Patient-ID modal is a validated dropdown**, not free text — removes
+  a whole class of typos, unauthorised-access attempts, and regex
+  false-positives (B-003 becomes almost trivial).
+- **Server-side validation on `POST /threads`:**
+  - Patient does not exist → **404** with `{"error_code": "patient_not_found"}`
+  - Clinician not allow-listed → **403** with `{"error_code": "access_denied"}`
+  - Success → **200** with `{"thread_id": ...}`
+- **No `/logout` endpoint.** Patient switching is a new thread. Auth
+  session terminates via the client dropping the Entra token (standard).
+- **Cosmos TTL for threads:** left at 7 days as an interim default;
+  can be raised to 30 or 90 days once UX confirms typical resume
+  horizons. Not blocking.
+
+### Next actions on our side (implementation slice)
+
+- New endpoints (thin — thread creation is 5 lines, list is 10):
+  `POST /threads`, `GET /threads`, `GET /patients` in
+  `src/egp_maf/api/threads.py`.
+- New Pydantic models: `ThreadCreateRequest`, `ThreadCreateResponse`,
+  `ThreadListItem`, `PatientAutocompleteItem`.
+- `POST /chat` behaviour: add `thread_patient_id = await
+  thread_state.get_patient_id(thread_id)`; raise
+  `ThreadPatientMismatch(409)` if it differs from `body.patient_id`.
+- Cosmos `ThreadDocument` gains a `patient_id` field at creation and
+  is never mutated after that.
+- ScopeGuard simplifies: the "authenticated patient" for regex
+  comparison is now unambiguously the thread's `patient_id`.
+
 ---
 
 ## B-006 — Audit sink & alerting for scope violations
 
-**Status:** OPEN
+**Status:** DEFERRED (2026-07-17, Vijay — revisit after Compass integration)
 **Owners (customer side):** M42 (security/ops) · SIEM team
 **Blocks:** Wiring of `AuditEvent(type="scope.violation", …)` ·
 Sev-3 alert rule in `infra/monitoring/alerts.bicep`.
@@ -459,6 +547,25 @@ page.
   sink.
 - Do **not** add an alert rule to `alerts.bicep` until the threshold is
   agreed.
+
+### Deferral decision (2026-07-17, Vijay)
+
+Operational plumbing that does **not block any product-visible
+behaviour**. Revisit once:
+
+1. Compass keys arrive and real-LLM traffic starts flowing.
+2. Prod deployment is wired to an Azure subscription.
+3. M42 security team has a designated SIEM sink and paging
+   threshold.
+
+Until then:
+
+- `AuditEvent(type="scope.violation", …)` is emitted to the same Log
+  Analytics workspace as W07 audit events (safe default).
+- **No alert rule is added** to `infra/monitoring/alerts.bicep` for
+  scope violations. When the customer confirms, we add a single
+  scheduled-query rule mirroring the pattern used by the other 9
+  alerts in W11.
 
 ---
 
