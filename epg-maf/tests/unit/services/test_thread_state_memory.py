@@ -116,3 +116,56 @@ class TestListByPatient:
         )
 
         assert len(threads) == 2
+
+
+class TestListRecent:
+    """Slice 2: cross-patient listing for the sidebar's initial load."""
+
+    @pytest.mark.asyncio
+    async def test_returns_all_clinicians_threads_across_patients(self) -> None:
+        p = InMemoryThreadStateProvider()
+        await p.create_thread(clinician_id="alice", tenant_id="t1", patient_id="PGP001")
+        await p.create_thread(clinician_id="alice", tenant_id="t1", patient_id="PGP002")
+        await p.create_thread(clinician_id="alice", tenant_id="t1", patient_id="PGP003")
+        # Different clinician — must not appear.
+        await p.create_thread(clinician_id="bob", tenant_id="t1", patient_id="PGP001")
+
+        threads = await p.list_recent(clinician_id="alice")
+
+        assert len(threads) == 3
+        assert {t.patient_id for t in threads} == {"PGP001", "PGP002", "PGP003"}
+
+    @pytest.mark.asyncio
+    async def test_ordered_by_last_activity_desc(self) -> None:
+        p = InMemoryThreadStateProvider()
+        first = await p.create_thread(
+            clinician_id="alice", tenant_id="t1", patient_id="PGP001"
+        )
+        # Touch first's activity so it's clearly newer than second.
+        second = await p.create_thread(
+            clinician_id="alice", tenant_id="t1", patient_id="PGP002"
+        )
+        # Re-save first so its last_activity is later than second's.
+        await p.save(first)
+
+        threads = await p.list_recent(clinician_id="alice")
+
+        assert threads[0].thread_id == first.thread_id
+        assert threads[1].thread_id == second.thread_id
+
+
+class TestTitleField:
+    @pytest.mark.asyncio
+    async def test_title_persists_through_save(self) -> None:
+        p = InMemoryThreadStateProvider()
+        doc = await p.create_thread(
+            clinician_id="alice",
+            tenant_id="t1",
+            patient_id="PGP001",
+            title="Follow-up chat",
+        )
+        assert doc.title == "Follow-up chat"
+
+        loaded = await p.load(doc.thread_id, "alice")
+        assert loaded is not None
+        assert loaded.title == "Follow-up chat"

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError as PydanticValidationError
 
@@ -119,6 +119,7 @@ def create_app(container: Container) -> FastAPI:
                 ctx=ctx,
                 body_thread_id=body.thread_id,
                 body_patient_id=body.patient_id,
+                body_message=body.message,
             )
 
             initial = ChatWorkflowState(
@@ -191,16 +192,19 @@ def create_app(container: Container) -> FastAPI:
             clinician_id=ctx.clinician_id,
             tenant_id=ctx.tenant_id,
             patient_id=body.patient_id,
+            title=body.title,
         )
         _logger.info(
             "threads.created",
             thread_id=thread.thread_id,
             clinician_id=ctx.clinician_id,
             patient_id=body.patient_id,
+            has_title=body.title is not None,
         )
         return ThreadCreateResponse(
             thread_id=thread.thread_id,
             patient_id=thread.patient_id,
+            title=thread.title,
             created_at=thread.created_at,
         )
 
@@ -211,31 +215,85 @@ def create_app(container: Container) -> FastAPI:
     )
     async def list_threads(
         request: Request,
-        patient_id: str,
+        patient_id: str | None = None,
         limit: int = 50,
         authorization: str | None = Header(default=None),
     ) -> ThreadListResponse:
-        """Return the clinician's threads for a specific patient."""
+        """Return the clinician's threads.
+
+        - ``?patient_id=X`` → threads for that patient only (403 if the
+          clinician is not allow-listed for the patient).
+        - No query param → the clinician's most recent threads across
+          all patients (Slice 2 — sidebar initial load).
+        """
         token = _extract_bearer(authorization)
         ctx = await container.authenticator.authenticate(
             token, route="/threads"
         )
-        container.authz_policy.enforce_read(ctx, patient_id)
         limit = max(1, min(limit, 200))
-        docs = await container.thread_state_provider.list_by_patient(
-            clinician_id=ctx.clinician_id,
-            patient_id=patient_id,
-            limit=limit,
-        )
+
+        if patient_id is not None:
+            container.authz_policy.enforce_read(ctx, patient_id)
+            docs = await container.thread_state_provider.list_by_patient(
+                clinician_id=ctx.clinician_id,
+                patient_id=patient_id,
+                limit=limit,
+            )
+        else:
+            docs = await container.thread_state_provider.list_recent(
+                clinician_id=ctx.clinician_id,
+                limit=limit,
+            )
+
         items = [
             ThreadListItem(
                 thread_id=d.thread_id,
                 patient_id=d.patient_id,
+                title=d.title,
                 last_activity=d.last_activity,
             )
             for d in docs
         ]
         return ThreadListResponse(threads=items, count=len(items))
+
+    @app.delete(
+        "/threads/{thread_id}",
+        status_code=204,
+        responses={
+            401: {"model": ErrorResponseBody},
+            404: {"model": ErrorResponseBody},
+        },
+    )
+    async def delete_thread(
+        thread_id: str,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        """Delete the clinician's own thread.
+
+        - 204 No Content on success.
+        - 404 ``patient_unavailable`` if the thread does not exist for
+          this clinician — identical shape to the "unknown patient" 404
+          so an attacker cannot enumerate thread ids belonging to other
+          clinicians.
+        """
+        token = _extract_bearer(authorization)
+        ctx = await container.authenticator.authenticate(
+            token, route="/threads"
+        )
+        provider = container.thread_state_provider
+        existing = await provider.load(thread_id, ctx.clinician_id)
+        if existing is None:
+            raise PatientUnavailable(
+                f"Thread {thread_id} is not available for this session."
+            )
+        await provider.delete(thread_id, ctx.clinician_id)
+        _logger.info(
+            "threads.deleted",
+            thread_id=thread_id,
+            clinician_id=ctx.clinician_id,
+        )
+        return Response(status_code=204)
 
     # ── Error handlers ─────────────────────────────────────────────
     app.add_exception_handler(EgpError, _egp_error_handler)
@@ -254,6 +312,7 @@ async def _enforce_thread_pin(
     ctx: ClinicianContext,
     body_thread_id: str,
     body_patient_id: str,
+    body_message: str = "",
 ) -> None:
     """Ensure ``body_patient_id`` matches the thread's pinned patient.
 
@@ -297,6 +356,7 @@ async def _enforce_thread_pin(
             tenant_id=ctx.tenant_id,
             patient_id=body_patient_id,
             thread_id=body_thread_id,
+            title=_auto_title(body_message),
         )
         _logger.info(
             "chat.thread_auto_created",
@@ -329,6 +389,22 @@ def _extract_bearer(header: str | None) -> str:
     if not token:
         raise AuthenticationError("Empty bearer token")
     return token
+
+
+def _auto_title(message: str, *, max_len: int = 60) -> str | None:
+    """Derive a human-readable thread title from the first user message.
+
+    Returns ``None`` for empty input so the sidebar can render a
+    fallback label. Never raises.
+    """
+    if not message:
+        return None
+    cleaned = " ".join(message.split())
+    if not cleaned:
+        return None
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[: max_len - 1].rstrip() + "\u2026"
 
 
 def _extract_final_state(run_result: Any) -> ChatWorkflowState:

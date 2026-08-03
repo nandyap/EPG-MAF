@@ -150,6 +150,7 @@ class ThreadStateProvider:
         patient_id: str,
         thread_id: str | None = None,
         clinician_specialty: str | None = None,
+        title: str | None = None,
     ) -> SessionDocument:
         """Create and persist a fresh thread pinned to ``patient_id``.
 
@@ -165,6 +166,7 @@ class ThreadStateProvider:
             tenant_id=tenant_id,
             patient_id=patient_id,
             clinician_specialty=clinician_specialty,
+            title=title,
         )
         return await self.save(doc)
 
@@ -218,6 +220,44 @@ class ThreadStateProvider:
         except cosmos_exc.CosmosHttpResponseError as exc:  # pragma: no cover
             raise CosmosUnavailable(
                 f"Failed to list threads for clinician {clinician_id}"
+            ) from exc
+        return results
+
+    async def list_recent(
+        self,
+        *,
+        clinician_id: str,
+        limit: int = 50,
+    ) -> list[SessionDocument]:
+        """Return the clinician's most recently active threads across all
+        patients — ordered by ``last_activity`` DESC.
+
+        Powers the frontend's initial sidebar load (Slice 2).
+        """
+        from azure.cosmos import exceptions as cosmos_exc  # type: ignore[import-untyped]
+
+        container = await self._container_proxy()
+        query = (
+            "SELECT * FROM c "
+            "WHERE c.clinician_id = @clinician_id "
+            "ORDER BY c.last_activity DESC"
+        )
+        params: list[dict[str, Any]] = [
+            {"name": "@clinician_id", "value": clinician_id},
+        ]
+        results: list[SessionDocument] = []
+        try:
+            async for item in container.query_items(
+                query=query,
+                parameters=params,
+                partition_key=clinician_id,
+            ):
+                results.append(self._document_from_item(item))
+                if len(results) >= limit:
+                    break
+        except cosmos_exc.CosmosHttpResponseError as exc:  # pragma: no cover
+            raise CosmosUnavailable(
+                f"Failed to list recent threads for clinician {clinician_id}"
             ) from exc
         return results
 

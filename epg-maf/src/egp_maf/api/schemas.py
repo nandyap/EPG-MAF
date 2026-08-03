@@ -88,6 +88,9 @@ class ThreadCreateRequest(BaseModel):
     """Body of ``POST /threads`` — open a new chat pinned to one patient."""
 
     patient_id: str = Field(..., min_length=1, max_length=128)
+    # Slice 2: optional client-supplied title. If omitted, the API
+    # auto-populates from the first user message on POST /chat.
+    title: str | None = Field(default=None, max_length=200)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,6 +100,7 @@ class ThreadCreateResponse(BaseModel):
 
     thread_id: str
     patient_id: str
+    title: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(extra="forbid")
@@ -106,12 +110,14 @@ class ThreadListItem(BaseModel):
     """One thread in the sidebar listing (``GET /threads``).
 
     Deliberately excludes ``messages`` — the sidebar shows the pinned
-    ``patient_id`` and last-activity timestamp only. Retrieving the
-    full transcript is a separate endpoint (out of scope for Slice 1).
+    ``patient_id``, ``title``, and last-activity timestamp only.
+    Retrieving the full transcript is a separate endpoint (out of scope
+    for Slice 2).
     """
 
     thread_id: str
     patient_id: str
+    title: str | None = None
     last_activity: datetime
 
     model_config = ConfigDict(extra="forbid")

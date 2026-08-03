@@ -52,6 +52,11 @@ class SessionDocument(BaseModel):
     patient_id: str
     clinician_specialty: str | None = None
 
+    # Human-readable label for the sidebar (Slice 2). Optional — clients
+    # may supply one at create time; otherwise the API auto-fills from
+    # the first user message on ``POST /chat``. Max 200 chars.
+    title: str | None = None
+
     # ── Lifecycle ────────────────────────────────────────────────────
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

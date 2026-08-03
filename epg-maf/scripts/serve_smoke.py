@@ -57,10 +57,10 @@ def main() -> None:
 
     from egp_maf.api import create_app
 
-    # ``multi`` gives you two specialists so the UI response is
-    # richest to look at; each request creates a fresh state so this
-    # doesn't affect subsequent turns.
-    container = _make_container(scenario="multi")
+    # Slice 2: use the keyword-driven stub router so demo questions
+    # dispatch realistically ("what PRS…?" → prs only; "family history?"
+    # → family_history only; "give me everything" → all five).
+    container = _make_container(scenario="keyword")
     app = create_app(container)
 
     print("\n" + "=" * 60)

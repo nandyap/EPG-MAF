@@ -193,7 +193,7 @@ def _make_runtime(*, scenario: str, parts: dict[str, Any]) -> Any:
         chat_router = StubRouterLlm(
             ChatRouterDecision(needs_clinical_data=False, reason="chat only")
         )
-        orch_router = StubOrchRouterLlm([
+        orch_router: Any = StubOrchRouterLlm([
             SpecialistDispatchSet(specialists=[], reason="none"),
         ])
     elif scenario == "prs":
@@ -213,6 +213,19 @@ def _make_runtime(*, scenario: str, parts: dict[str, Any]) -> Any:
             SpecialistDispatchSet(specialists=["pgx"], reason="need PGX"),
             SpecialistDispatchSet(specialists=[], reason="done"),
         ])
+    elif scenario == "keyword":
+        # Slice 2: realistic dispatch driven by keywords in the query.
+        # Used as the default for the Swagger UI demo so questions like
+        # "what PRS does this patient have" dispatch only PRS.
+        from smoke_router import KeywordSmokeOrchRouterLlm  # type: ignore[import-not-found]
+
+        chat_router = StubRouterLlm(
+            ChatRouterDecision(
+                needs_clinical_data=True,
+                reason="smoke: assume clinical intent",
+            )
+        )
+        orch_router = KeywordSmokeOrchRouterLlm()
     else:
         raise SystemExit(f"unknown scenario: {scenario}")
 
@@ -267,6 +280,7 @@ async def _run_workflow_scenario(scenario: str) -> None:
         "simple": "Hi, how does this system work?",
         "prs": "What polygenic risk scores does patient P001 have?",
         "multi": "Give me a combined risk + pharmacogenomics picture for P001.",
+        "keyword": "What PRS and drug interactions does this patient have?",
     }[scenario]
 
     initial = ChatWorkflowState(
@@ -324,6 +338,7 @@ def _run_http_scenario(scenario: str) -> None:
         "simple": "Hi, how does this system work?",
         "prs": "What polygenic risk scores does patient P001 have?",
         "multi": "Give me a combined risk + pharmacogenomics picture for P001.",
+        "keyword": "What PRS and drug interactions does this patient have?",
     }[scenario]
 
     resp = client.post(
@@ -362,7 +377,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="EGP Window smoke run")
     parser.add_argument(
         "--scenario",
-        choices=["simple", "prs", "multi", "all"],
+        choices=["simple", "prs", "multi", "keyword", "all"],
         default="all",
         help="Which scenario(s) to run (default: all).",
     )

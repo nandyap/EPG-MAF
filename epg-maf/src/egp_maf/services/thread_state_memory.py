@@ -64,6 +64,7 @@ class InMemoryThreadStateProvider:
         patient_id: str,
         thread_id: str | None = None,
         clinician_specialty: str | None = None,
+        title: str | None = None,
     ) -> SessionDocument:
         doc = SessionDocument(
             thread_id=thread_id or f"T-{uuid.uuid4().hex[:16]}",
@@ -71,6 +72,7 @@ class InMemoryThreadStateProvider:
             tenant_id=tenant_id,
             patient_id=patient_id,
             clinician_specialty=clinician_specialty,
+            title=title,
         )
         return await self.save(doc)
 
@@ -91,6 +93,18 @@ class InMemoryThreadStateProvider:
             doc
             for (cid, _tid), doc in self._store.items()
             if cid == clinician_id and doc.patient_id == patient_id
+        ]
+        matches.sort(key=lambda d: d.last_activity, reverse=True)
+        return matches[:limit]
+
+    async def list_recent(
+        self,
+        *,
+        clinician_id: str,
+        limit: int = 50,
+    ) -> list[SessionDocument]:
+        matches = [
+            doc for (cid, _tid), doc in self._store.items() if cid == clinician_id
         ]
         matches.sort(key=lambda d: d.last_activity, reverse=True)
         return matches[:limit]
