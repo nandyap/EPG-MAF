@@ -136,3 +136,38 @@ class LlmError(EgpError):
 
     error_code = "llm_error"
     http_status = 502
+
+
+# ── Slice 1: thread pinning (blocker resolutions B-002 + B-005) ────
+
+
+class ThreadPatientMismatch(EgpError):
+    """Raised when ``POST /chat`` sends a ``patient_id`` that differs from
+    the ``patient_id`` pinned on the thread at creation time.
+
+    The pin is immutable — a new patient means a new thread
+    (``POST /threads``). This maps to the golden-dataset refusal G1
+    ("this chat is for patient X; please start a new chat").
+    """
+
+    error_code = "thread_patient_mismatch"
+    http_status = 409
+
+
+class PatientUnavailable(EgpError):
+    """Raised by ``POST /threads`` when the requested ``patient_id`` cannot
+    be used to open a new chat.
+
+    Deliberately conflates two underlying reasons at the HTTP boundary:
+
+    1. The patient does not exist in the database.
+    2. The authenticated clinician is not on the patient's allowlist.
+
+    The response body carries the same ``error_code`` and message in both
+    cases so a caller cannot enumerate patient existence by response
+    inspection (B-005 §"Locked-down design points"). The server logs the
+    underlying reason at DEBUG level for the audit trail only.
+    """
+
+    error_code = "patient_unavailable"
+    http_status = 404

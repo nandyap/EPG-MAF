@@ -7,6 +7,7 @@ send fields like ``ctx`` or ``agents_completed`` even by accident.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -76,5 +77,50 @@ class HealthResponseBody(BaseModel):
     status: str
     service: str = "egp-window"
     env: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# ── Slice 1: thread pinning (B-002 + B-005) ───────────────────────────
+
+
+class ThreadCreateRequest(BaseModel):
+    """Body of ``POST /threads`` — open a new chat pinned to one patient."""
+
+    patient_id: str = Field(..., min_length=1, max_length=128)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThreadCreateResponse(BaseModel):
+    """Response of a successful ``POST /threads`` (HTTP 200)."""
+
+    thread_id: str
+    patient_id: str
+    created_at: datetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThreadListItem(BaseModel):
+    """One thread in the sidebar listing (``GET /threads``).
+
+    Deliberately excludes ``messages`` — the sidebar shows the pinned
+    ``patient_id`` and last-activity timestamp only. Retrieving the
+    full transcript is a separate endpoint (out of scope for Slice 1).
+    """
+
+    thread_id: str
+    patient_id: str
+    last_activity: datetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThreadListResponse(BaseModel):
+    """Response of ``GET /threads``."""
+
+    threads: list[ThreadListItem] = Field(default_factory=list)
+    count: int = 0
 
     model_config = ConfigDict(extra="forbid")

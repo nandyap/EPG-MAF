@@ -19,7 +19,7 @@ from egp_maf.config.settings import Settings
 from egp_maf.di.container import Container
 from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.services.provenance import ProvenanceService
-from egp_maf.services.thread_state import ThreadStateProvider
+from egp_maf.services.thread_state_memory import InMemoryThreadStateProvider
 from egp_maf.telemetry import NullMetricEmitter, build_telemetry_provider
 from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
 from egp_maf.workflow.router_llm import StubOrchRouterLlm, StubRouterLlm
@@ -71,7 +71,7 @@ def _make_container() -> Container:
         settings, client_constructor=lambda **_: object()
     )
     prompt = _NoopPrompts()
-    thread_state = ThreadStateProvider(cosmos, settings)  # type: ignore[arg-type]
+    thread_state = InMemoryThreadStateProvider()
 
     empty_registry = SpecialistRegistry()
     runtime = WorkflowRuntime(

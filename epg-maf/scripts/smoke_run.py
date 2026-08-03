@@ -75,7 +75,7 @@ def _build_container() -> Any:
     from egp_maf.di.container import Container
     from egp_maf.infrastructure.compass_client import LlmClientFactory
     from egp_maf.services.provenance import ProvenanceService
-    from egp_maf.services.thread_state import ThreadStateProvider
+    from egp_maf.services.thread_state_memory import InMemoryThreadStateProvider
     from egp_maf.state.results.family_history import FamilyHistoryResultList
     from egp_maf.state.results.genomic_variants import GenomicVariantsResultList
     from egp_maf.state.results.pgx import PGXDrugResult, PGXResultList
@@ -88,6 +88,11 @@ def _build_container() -> Any:
     from egp_maf.workflow.runtime import WorkflowRuntime
     from tests.support.authz_doubles import OpenAuthzPolicy
 
+    # Slice 1: smoke server uses OpenAuthzPolicy (accepts everything) so
+    # the demo Just Works with any patient_id. The seed_allowlist.json
+    # sibling file documents the shape for real deployments; wire it in
+    # for a stricter demo by swapping to AllowlistAuthzPolicy in
+    # _make_container below.
     settings = Settings(  # type: ignore[call-arg]
         auth_stub_enabled=True,
         auth_required_role="Clinician",
@@ -107,7 +112,7 @@ def _build_container() -> Any:
     cosmos = _NoopFactory()
     llm_factory = LlmClientFactory(settings, client_constructor=lambda **_: object())
     prompt_service = _NoopPrompts()
-    thread_state = ThreadStateProvider(cosmos, settings)  # type: ignore[arg-type]
+    thread_state = InMemoryThreadStateProvider()
 
     # ── Specialists with mocked repositories + canned typed results ──
     provenance = ProvenanceService()

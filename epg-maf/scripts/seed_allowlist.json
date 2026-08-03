@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "clinicians": {
+    "demo": ["PGP001", "PGP002", "HG04001", "NA12878", "P001"]
+  },
+  "admins": []
+}

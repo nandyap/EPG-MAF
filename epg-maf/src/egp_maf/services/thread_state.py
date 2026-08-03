@@ -138,6 +138,89 @@ class ThreadStateProvider:
                 f"Failed to delete session {thread_id} for {clinician_id}"
             ) from exc
 
+    # ── Slice 1: thread pinning helpers (B-002 + B-005) ─────────────
+    # Every thread pins exactly one ``patient_id`` at create time. The
+    # pin is immutable — a new patient means a new thread.
+
+    async def create_thread(
+        self,
+        *,
+        clinician_id: str,
+        tenant_id: str,
+        patient_id: str,
+        thread_id: str | None = None,
+        clinician_specialty: str | None = None,
+    ) -> SessionDocument:
+        """Create and persist a fresh thread pinned to ``patient_id``.
+
+        Callers (typically the ``POST /threads`` route) MUST have already
+        verified that the patient exists and that the clinician is
+        allow-listed. This method only performs the write.
+        """
+        import uuid
+
+        doc = SessionDocument(
+            thread_id=thread_id or f"T-{uuid.uuid4().hex[:16]}",
+            clinician_id=clinician_id,
+            tenant_id=tenant_id,
+            patient_id=patient_id,
+            clinician_specialty=clinician_specialty,
+        )
+        return await self.save(doc)
+
+    async def get_patient_id(
+        self, thread_id: str, clinician_id: str
+    ) -> str | None:
+        """Return the ``patient_id`` pinned on the thread, or ``None`` if
+        the thread does not exist.
+
+        Called on every ``POST /chat`` to enforce
+        ``body.patient_id == thread.patient_id``.
+        """
+        doc = await self.load(thread_id, clinician_id)
+        return doc.patient_id if doc is not None else None
+
+    async def list_by_patient(
+        self,
+        *,
+        clinician_id: str,
+        patient_id: str,
+        limit: int = 50,
+    ) -> list[SessionDocument]:
+        """Return the clinician's threads for a specific patient.
+
+        Ordered by ``last_activity`` DESC. Powers the ChatGPT-style
+        sidebar (B-005).
+        """
+        from azure.cosmos import exceptions as cosmos_exc  # type: ignore[import-untyped]
+
+        container = await self._container_proxy()
+        query = (
+            "SELECT * FROM c "
+            "WHERE c.clinician_id = @clinician_id "
+            "  AND c.patient_id = @patient_id "
+            "ORDER BY c.last_activity DESC"
+        )
+        params: list[dict[str, Any]] = [
+            {"name": "@clinician_id", "value": clinician_id},
+            {"name": "@patient_id", "value": patient_id},
+        ]
+        results: list[SessionDocument] = []
+        try:
+            async for item in container.query_items(
+                query=query,
+                parameters=params,
+                partition_key=clinician_id,
+            ):
+                results.append(self._document_from_item(item))
+                if len(results) >= limit:
+                    break
+        except cosmos_exc.CosmosHttpResponseError as exc:  # pragma: no cover
+            raise CosmosUnavailable(
+                f"Failed to list threads for clinician {clinician_id}"
+            ) from exc
+        return results
+
     # ── Serialisation helpers ───────────────────────────────────────
     @staticmethod
     def _document_from_item(item: dict[str, Any]) -> SessionDocument:

@@ -33,11 +33,20 @@ from egp_maf.api.schemas import (
     ChatSpecialistSlotView,
     ErrorResponseBody,
     HealthResponseBody,
+    ThreadCreateRequest,
+    ThreadCreateResponse,
+    ThreadListItem,
+    ThreadListResponse,
 )
 from egp_maf.auth.audit import AuditEventEmitter
 from egp_maf.auth.authenticator import AuthenticationError, Authenticator
 from egp_maf.di.container import Container
-from egp_maf.errors import EgpError
+from egp_maf.errors import (
+    AccessDenied,
+    EgpError,
+    PatientUnavailable,
+    ThreadPatientMismatch,
+)
 from egp_maf.logging.setup import get_logger
 from egp_maf.resilience import format_error_response
 from egp_maf.state.clinician_context import ClinicianContext
@@ -101,6 +110,17 @@ def create_app(container: Container) -> FastAPI:
                 token, route="/chat"
             )
 
+            # Slice 1: enforce thread pin.
+            # ``body.patient_id`` must equal the ``patient_id`` recorded
+            # on the thread at creation time. A new patient means a new
+            # thread. See ADR B-002 + B-005.
+            await _enforce_thread_pin(
+                container=container,
+                ctx=ctx,
+                body_thread_id=body.thread_id,
+                body_patient_id=body.patient_id,
+            )
+
             initial = ChatWorkflowState(
                 ctx=ctx,
                 patient_id=body.patient_id,
@@ -119,6 +139,104 @@ def create_app(container: Container) -> FastAPI:
             trace_id, _span_id = get_current_trace_and_span_ids()
             return _project_response(final, trace_id=trace_id)
 
+    # ── Threads (Slice 1 — B-002 + B-005) ──────────────────────────
+    @app.post(
+        "/threads",
+        response_model=ThreadCreateResponse,
+        responses={
+            401: {"model": ErrorResponseBody},
+            404: {"model": ErrorResponseBody},
+        },
+    )
+    async def create_thread(
+        body: ThreadCreateRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> ThreadCreateResponse:
+        """Open a new chat pinned to ``body.patient_id``.
+
+        Returns HTTP 404 (``patient_unavailable``) with an identical body
+        when the patient does not exist OR the clinician is not
+        allow-listed. Prevents caller from enumerating patient existence
+        by response inspection.
+        """
+        token = _extract_bearer(authorization)
+        ctx = await container.authenticator.authenticate(
+            token, route="/threads"
+        )
+
+        # Allowlist check — deliberately swallow ``AccessDenied`` and
+        # translate to the identical ``PatientUnavailable`` used for
+        # "patient does not exist".
+        try:
+            container.authz_policy.enforce_read(ctx, body.patient_id)
+        except AccessDenied:
+            _logger.debug(
+                "threads.create.access_denied",
+                clinician_id=ctx.clinician_id,
+                patient_id=body.patient_id,
+                reason="access_denied",
+            )
+            raise PatientUnavailable(
+                f"Patient {body.patient_id} is not available for this session."
+            )
+
+        # Existence check would go here once a patient repository is wired.
+        # For now the allowlist doubles as the existence check — a
+        # patient a clinician isn't allow-listed for is indistinguishable
+        # from a non-existent patient from the caller's perspective,
+        # which is the exact enumeration-defence property we want.
+
+        thread = await container.thread_state_provider.create_thread(
+            clinician_id=ctx.clinician_id,
+            tenant_id=ctx.tenant_id,
+            patient_id=body.patient_id,
+        )
+        _logger.info(
+            "threads.created",
+            thread_id=thread.thread_id,
+            clinician_id=ctx.clinician_id,
+            patient_id=body.patient_id,
+        )
+        return ThreadCreateResponse(
+            thread_id=thread.thread_id,
+            patient_id=thread.patient_id,
+            created_at=thread.created_at,
+        )
+
+    @app.get(
+        "/threads",
+        response_model=ThreadListResponse,
+        responses={401: {"model": ErrorResponseBody}, 403: {"model": ErrorResponseBody}},
+    )
+    async def list_threads(
+        request: Request,
+        patient_id: str,
+        limit: int = 50,
+        authorization: str | None = Header(default=None),
+    ) -> ThreadListResponse:
+        """Return the clinician's threads for a specific patient."""
+        token = _extract_bearer(authorization)
+        ctx = await container.authenticator.authenticate(
+            token, route="/threads"
+        )
+        container.authz_policy.enforce_read(ctx, patient_id)
+        limit = max(1, min(limit, 200))
+        docs = await container.thread_state_provider.list_by_patient(
+            clinician_id=ctx.clinician_id,
+            patient_id=patient_id,
+            limit=limit,
+        )
+        items = [
+            ThreadListItem(
+                thread_id=d.thread_id,
+                patient_id=d.patient_id,
+                last_activity=d.last_activity,
+            )
+            for d in docs
+        ]
+        return ThreadListResponse(threads=items, count=len(items))
+
     # ── Error handlers ─────────────────────────────────────────────
     app.add_exception_handler(EgpError, _egp_error_handler)
     app.add_exception_handler(PydanticValidationError, _validation_error_handler)
@@ -128,6 +246,75 @@ def create_app(container: Container) -> FastAPI:
 
 
 # ── Helpers ────────────────────────────────────────────────────────
+
+
+async def _enforce_thread_pin(
+    *,
+    container: Container,
+    ctx: ClinicianContext,
+    body_thread_id: str,
+    body_patient_id: str,
+) -> None:
+    """Ensure ``body_patient_id`` matches the thread's pinned patient.
+
+    Three cases:
+
+    - Thread exists and patient matches → return silently.
+    - Thread exists and patient differs → raise
+      :class:`ThreadPatientMismatch` (409).
+    - Thread does not exist yet:
+
+      - Dev / stub-auth mode (``settings.auth_stub_enabled``):
+        auto-create the thread with ``body_patient_id``. Preserves the
+        smoke-server "just POST /chat" ergonomics.
+      - Prod: raise :class:`PatientUnavailable` (404). Client MUST call
+        ``POST /threads`` first.
+    """
+    provider = container.thread_state_provider
+    pinned = await provider.get_patient_id(body_thread_id, ctx.clinician_id)
+
+    if pinned is not None:
+        if pinned != body_patient_id:
+            _logger.warning(
+                "chat.thread_patient_mismatch",
+                thread_id=body_thread_id,
+                thread_patient_id=pinned,
+                body_patient_id=body_patient_id,
+                clinician_id=ctx.clinician_id,
+            )
+            raise ThreadPatientMismatch(
+                f"This chat is pinned to a different patient. "
+                f"Please start a new chat for patient {body_patient_id}."
+            )
+        return
+
+    # Thread does not exist.
+    if container.settings.auth_stub_enabled:
+        # Dev-only convenience: auto-create so the smoke server can be
+        # driven with a bare POST /chat.
+        await provider.create_thread(
+            clinician_id=ctx.clinician_id,
+            tenant_id=ctx.tenant_id,
+            patient_id=body_patient_id,
+            thread_id=body_thread_id,
+        )
+        _logger.info(
+            "chat.thread_auto_created",
+            thread_id=body_thread_id,
+            clinician_id=ctx.clinician_id,
+            patient_id=body_patient_id,
+            reason="auth_stub_enabled",
+        )
+        return
+
+    _logger.warning(
+        "chat.thread_not_found",
+        thread_id=body_thread_id,
+        clinician_id=ctx.clinician_id,
+    )
+    raise PatientUnavailable(
+        f"Patient {body_patient_id} is not available for this session."
+    )
 
 
 def _extract_bearer(header: str | None) -> str:
