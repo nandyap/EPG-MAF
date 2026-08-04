@@ -122,6 +122,39 @@ def create_app(container: Container) -> FastAPI:
                 body_message=body.message,
             )
 
+            # Slice 3: single-patient scope guardrail.
+            # ScopeGuard is deterministic (regex + keyword rules) and
+            # runs synchronously — no LLM call. A refusal short-circuits
+            # the workflow and returns a clinician-friendly reply.
+            trace_id_early, _ = get_current_trace_and_span_ids()
+            scope_decision = container.scope_guard.check(
+                message=body.message,
+                session_patient_id=body.patient_id,
+            )
+            if scope_decision.is_refusal():
+                # Emit both a structured log line and a real audit event
+                # (B-006 sink deferred; the shape is stable).
+                _logger.warning(
+                    "scope.guard.refused",
+                    thread_id=body.thread_id,
+                    clinician_id=ctx.clinician_id,
+                    patient_id=body.patient_id,
+                    reason=scope_decision.reason,
+                    matched_ids=scope_decision.matched_ids,
+                )
+                container.audit_emitter.emit_scope_violation(
+                    clinician_id=ctx.clinician_id,
+                    tenant_id=ctx.tenant_id,
+                    patient_id=body.patient_id,
+                    reason=scope_decision.reason,
+                    trace_id=trace_id_early,
+                )
+                return _refusal_response(
+                    body=body,
+                    refusal_message=scope_decision.refusal_message or "",
+                    trace_id=trace_id_early,
+                )
+
             initial = ChatWorkflowState(
                 ctx=ctx,
                 patient_id=body.patient_id,
@@ -454,6 +487,33 @@ def _project_response(
         family_history=_slot_to_view(final.family_history),
         pgx=_slot_to_view(final.pgx),
         phenotype=_slot_to_view(final.phenotype),
+    )
+
+
+def _refusal_response(
+    *,
+    body: ChatRequestBody,
+    refusal_message: str,
+    trace_id: str | None,
+) -> ChatResponseBody:
+    """Slice 3 — short-circuit response when :class:`ScopeGuard` refuses.
+
+    HTTP 200 (this is a clinician-visible refusal, not a technical
+    error). The response body carries the refusal text as the ``reply``
+    and leaves every specialist slot empty so the frontend renders it
+    as an ordinary assistant message.
+    """
+    return ChatResponseBody(
+        thread_id=body.thread_id,
+        patient_id=body.patient_id,
+        trace_id=trace_id,
+        reply=refusal_message,
+        agents_completed=[],
+        prs=None,
+        genomic_variants=None,
+        family_history=None,
+        pgx=None,
+        phenotype=None,
     )
 
 

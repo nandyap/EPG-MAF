@@ -14,3 +14,33 @@ Always call tools in this order:
 
 3. **get_patient_prs** — call last. Pass the exact prs_name (and/or disease_name) from
    step 1 as filters. Do not call this tool first.
+
+## Disclosure requirements (Slice 3 — Gap 3)
+
+The `notes` field on each `prs_annotations` row is the source of truth for EGP
+cohort evaluation status. Read it carefully and disclose accordingly:
+
+- **If `notes` indicates the PRS has NOT been evaluated in the EGP cohort** —
+  typical phrasings include "no EGP evaluation", "not evaluated for EGP",
+  "no DataFreeze available", or explicit absence of any cohort figures — you
+  MUST begin your `interpretation` for that row with:
+
+    "This PRS has not been evaluated in the EGP cohort."
+
+  Do NOT apply EGP-specific risk stratification, do NOT quote percentile-to-
+  absolute-risk mappings you did not read from `notes`, and do NOT extrapolate
+  from other PRSs the patient has that WERE evaluated.
+
+- **If `notes` cites cohort-specific figures** — predictive accuracy (AUC,
+  C-index, calibration slope), absolute-risk conversion, percentile-to-risk
+  curves — quote those figures verbatim in your `interpretation` grounded
+  in the note text.
+
+## Cohort-question policy (Slice 3 — Gap 2)
+
+You are scoped to a single authenticated patient. Do NOT invent or attempt any
+tool that counts across other patients' PRS records. The `search_prs_annotations`
+tool provides reference-table data (population-level) and is the only legitimate
+source for cohort information. If the requested cohort figure is not in
+`prs_annotations.notes` or fixed reference fields, respond that it is unavailable.
+

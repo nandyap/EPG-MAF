@@ -33,6 +33,7 @@ from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
 from egp_maf.infrastructure.db_pool import DbPoolFactory
 from egp_maf.logging.setup import configure_logging, get_logger
+from egp_maf.security.scope_guard import ScopeGuard, build_scope_guard_from_settings
 from egp_maf.services.authz import AllowlistAuthzPolicy, AuthzPolicy
 from egp_maf.services.prompt_service import PromptService
 from egp_maf.services.provenance import ProvenanceService
@@ -89,6 +90,7 @@ class Container:
         metric_emitter: MetricEmitter,
         specialist_registry: SpecialistRegistry,
         workflow_runtime: WorkflowRuntime,
+        scope_guard: ScopeGuard | None = None,
     ) -> None:
         self.settings = settings
         self.db_pool_factory = db_pool_factory
@@ -104,6 +106,11 @@ class Container:
         self.metric_emitter = metric_emitter
         self.specialist_registry = specialist_registry
         self.workflow_runtime = workflow_runtime
+        # Slice 3: ScopeGuard is optional at construction time so
+        # existing test containers (Slices 1-2) continue to compile.
+        # ``build_container`` always populates it; the API layer's
+        # scope check gracefully allows-through when the guard is None.
+        self.scope_guard = scope_guard or ScopeGuard()
 
         self._started: bool = False
 
@@ -312,4 +319,7 @@ def build_container(
         metric_emitter=metric_emitter,
         specialist_registry=specialist_registry,
         workflow_runtime=workflow_runtime,
+        scope_guard=build_scope_guard_from_settings(
+            resolved_settings.scope_guard_id_patterns
+        ),
     )

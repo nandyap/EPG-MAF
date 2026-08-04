@@ -50,7 +50,7 @@ class GoldenItem(BaseModel):
     """One item in the golden set."""
 
     id: str = Field(..., min_length=1)
-    domain: str = Field(..., min_length=1)  # prs | genomic_variants | pgx | phenotype | family_history | multi
+    domain: str = Field(..., min_length=1)  # prs | genomic_variants | pgx | phenotype | family_history | multi | scope_guard
     question: str = Field(..., min_length=1)
     patient_id: str = Field(..., min_length=1)
     expected_tool_calls: list[GoldenToolCall] = Field(default_factory=list)
@@ -58,8 +58,13 @@ class GoldenItem(BaseModel):
     # (e.g. ``["output", "output.results"]``). Dotted-path notation;
     # values not compared here — the LLM-judge scorer covers that.
     expected_output_keys: list[str] = Field(default_factory=list)
+    # Slice 3: refusal-shape items assert that ``reply`` contains
+    # every substring in ``expected_refusal_substrings`` (case-insensitive)
+    # and that ``agents_completed`` is empty.
+    expected_refusal_substrings: list[str] = Field(default_factory=list)
     # Free-form tags for filtering (``edge_case``, ``privacy``,
-    # ``multi_domain``, ``dispatch_mode_parity``, etc.).
+    # ``multi_domain``, ``dispatch_mode_parity``, ``scope_guard``,
+    # ``cohort_allowed``, ``noeval_disclosure``, etc.).
     tags: list[str] = Field(default_factory=list)
     # BIX sign-off metadata. Empty until the SME approves.
     bix_reviewed: bool = False

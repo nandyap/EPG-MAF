@@ -35,7 +35,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-AuditOutcome = Literal["granted", "denied", "invalid_token", "role_denied"]
+AuditOutcome = Literal["granted", "denied", "invalid_token", "role_denied", "refused"]
 
 _AUDIT_LOGGER_NAME = "egp_maf.audit"
 
@@ -189,6 +189,35 @@ class AuditEventEmitter:
                 outcome="role_denied",
                 clinician_id=clinician_id,
                 tenant_id=tenant_id,
+                route=route,
+                reason=reason,
+                trace_id=trace_id,
+            )
+        )
+
+    def emit_scope_violation(
+        self,
+        *,
+        clinician_id: str,
+        tenant_id: str,
+        patient_id: str,
+        reason: str,
+        route: str = "api.chat",
+        trace_id: str | None = None,
+    ) -> None:
+        """Slice 3 — ``ScopeGuard`` refused a message.
+
+        Emitted for every refusal, regardless of the underlying signal
+        (cross-patient / cohort-scan). Feeds the Sev-3 alert rule that
+        B-006 will wire once the customer confirms the SIEM sink.
+        """
+        self._sink.emit(
+            AuditEvent(
+                event="scope.violation",
+                outcome="refused",
+                clinician_id=clinician_id,
+                tenant_id=tenant_id,
+                patient_id=patient_id,
                 route=route,
                 reason=reason,
                 trace_id=trace_id,

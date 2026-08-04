@@ -147,6 +147,16 @@ class Settings(BaseSettings):
     auth_stub_enabled: bool = Field(default=False, alias="EGP_AUTH_STUB_ENABLED")
     auth_required_role: str = Field(default="Clinician", alias="EGP_AUTH_REQUIRED_ROLE")
 
+    # ── Scope guard (Slice 3 — Gap 1 single-patient guardrail) ─────
+    # Comma-separated list of regex patterns identifying patient IDs.
+    # Empty / unset → the built-in defaults in
+    # :mod:`egp_maf.security.scope_guard` (PGP\d+ + HG\d{5} + NA\d{5}).
+    # Set via env to add customer-specific ID namespaces without a
+    # code change.
+    scope_guard_id_patterns: str | None = Field(
+        default=None, alias="SCOPE_GUARD_ID_PATTERNS"
+    )
+
     # ── Resilience (W09) ───────────────────────────────────────────
     # In-process retry wrapping around the LLM bridge. APIM's retry
     # policy is the outer layer; these apply when we call the LLM
