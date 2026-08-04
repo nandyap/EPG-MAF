@@ -35,8 +35,11 @@ from egp_maf.api.schemas import (
     HealthResponseBody,
     ThreadCreateRequest,
     ThreadCreateResponse,
+    ThreadDetailResponse,
     ThreadListItem,
     ThreadListResponse,
+    ThreadMessageView,
+    UserIdentityResponse,
 )
 from egp_maf.auth.audit import AuditEventEmitter
 from egp_maf.auth.authenticator import AuthenticationError, Authenticator
@@ -149,6 +152,15 @@ def create_app(container: Container) -> FastAPI:
                     reason=scope_decision.reason,
                     trace_id=trace_id_early,
                 )
+                # Slice 5 (B-009): persist the refusal so history is
+                # complete on refresh.
+                await _persist_refusal_messages(
+                    container=container,
+                    ctx=ctx,
+                    thread_id=body.thread_id,
+                    user_message=body.message,
+                    refusal_reply=scope_decision.refusal_message or "",
+                )
                 return _refusal_response(
                     body=body,
                     refusal_message=scope_decision.refusal_message or "",
@@ -171,6 +183,18 @@ def create_app(container: Container) -> FastAPI:
             final = _extract_final_state(result)
 
             trace_id, _span_id = get_current_trace_and_span_ids()
+
+            # Slice 5 (B-009): persist the user + assistant messages
+            # back onto the thread so ``GET /threads/{id}`` returns the
+            # full transcript on refresh.
+            await _persist_turn_messages(
+                container=container,
+                ctx=ctx,
+                thread_id=body.thread_id,
+                user_message=body.message,
+                final=final,
+            )
+
             return _project_response(final, trace_id=trace_id)
 
     # ── Threads (Slice 1 — B-002 + B-005) ──────────────────────────
@@ -327,6 +351,88 @@ def create_app(container: Container) -> FastAPI:
             clinician_id=ctx.clinician_id,
         )
         return Response(status_code=204)
+
+    # ── Slice 5: frontend-facing endpoints ─────────────────────────
+    @app.get(
+        "/api/me",
+        response_model=UserIdentityResponse,
+    )
+    async def me(
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> UserIdentityResponse:
+        """Return the current user's identity.
+
+        In prod behind Container Apps Easy Auth, the CAE injects
+        ``X-MS-CLIENT-PRINCIPAL-*`` headers we could read here; for
+        Slice 5 we keep parity with the rest of the API and derive
+        identity from the bearer token so the smoke server works
+        end-to-end.
+
+        Returns ``authenticated=false`` (never raises) when no valid
+        token is present — the frontend uses this to gate signed-in
+        routes.
+        """
+        try:
+            token = _extract_bearer(authorization)
+            ctx = await container.authenticator.authenticate(
+                token, route="/api/me"
+            )
+        except (AuthenticationError, EgpError):
+            return UserIdentityResponse(authenticated=False)
+        return UserIdentityResponse(
+            authenticated=True,
+            clinician_id=ctx.clinician_id,
+            name=ctx.name if hasattr(ctx, "name") else ctx.clinician_id,
+            roles=list(ctx.roles) if hasattr(ctx, "roles") else [],
+        )
+
+    @app.get(
+        "/threads/{thread_id}",
+        response_model=ThreadDetailResponse,
+        responses={
+            401: {"model": ErrorResponseBody},
+            404: {"model": ErrorResponseBody},
+        },
+    )
+    async def get_thread(
+        thread_id: str,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> ThreadDetailResponse:
+        """Return the full transcript of one thread.
+
+        Powers B-009 chat-history persistence on refresh. Returns
+        HTTP 404 (``patient_unavailable``) for both "thread doesn't
+        exist" and "thread belongs to a different clinician" to
+        preserve the enumeration defence.
+        """
+        token = _extract_bearer(authorization)
+        ctx = await container.authenticator.authenticate(
+            token, route="/threads"
+        )
+        doc = await container.thread_state_provider.load(
+            thread_id, ctx.clinician_id
+        )
+        if doc is None:
+            raise PatientUnavailable(
+                f"Thread {thread_id} is not available for this session."
+            )
+        return ThreadDetailResponse(
+            thread_id=doc.thread_id,
+            patient_id=doc.patient_id,
+            title=doc.title,
+            created_at=doc.created_at,
+            last_activity=doc.last_activity,
+            messages=[
+                ThreadMessageView(
+                    role=m.role,
+                    content=m.content,
+                    timestamp=m.timestamp,
+                )
+                for m in doc.messages
+            ],
+        )
 
     # ── Error handlers ─────────────────────────────────────────────
     app.add_exception_handler(EgpError, _egp_error_handler)
@@ -515,6 +621,65 @@ def _refusal_response(
         pgx=None,
         phenotype=None,
     )
+
+
+async def _persist_turn_messages(
+    *,
+    container: Container,
+    ctx: ClinicianContext,
+    thread_id: str,
+    user_message: str,
+    final: ChatWorkflowState,
+) -> None:
+    """Slice 5 (B-009) — append the turn's user + assistant messages
+    to the persisted thread so ``GET /threads/{id}`` returns the full
+    transcript on refresh.
+
+    Best-effort — a persistence failure MUST NOT change the HTTP
+    outcome the caller sees. Logs a warning and returns.
+    """
+    provider = container.thread_state_provider
+    try:
+        doc = await provider.load(thread_id, ctx.clinician_id)
+        if doc is None:
+            return
+        reply = _reply_from(final)
+        updated = doc.with_message(
+            SessionMessage(role="user", content=user_message)
+        )
+        if reply:
+            updated = updated.with_message(
+                SessionMessage(role="assistant", content=reply)
+            )
+        await provider.save(updated)
+    except Exception:  # noqa: BLE001
+        _logger.warning("chat.persist_messages_failed", thread_id=thread_id)
+
+
+async def _persist_refusal_messages(
+    *,
+    container: Container,
+    ctx: ClinicianContext,
+    thread_id: str,
+    user_message: str,
+    refusal_reply: str,
+) -> None:
+    """Slice 5 (B-009) — persist the refusal turn too so the transcript
+    is complete on refresh.
+    """
+    provider = container.thread_state_provider
+    try:
+        doc = await provider.load(thread_id, ctx.clinician_id)
+        if doc is None:
+            return
+        updated = doc.with_message(
+            SessionMessage(role="user", content=user_message)
+        ).with_message(
+            SessionMessage(role="assistant", content=refusal_reply)
+        )
+        await provider.save(updated)
+    except Exception:  # noqa: BLE001
+        _logger.warning("chat.persist_refusal_failed", thread_id=thread_id)
 
 
 # ── Exception handlers ────────────────────────────────────────────

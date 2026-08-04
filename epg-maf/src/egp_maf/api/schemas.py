@@ -130,3 +130,48 @@ class ThreadListResponse(BaseModel):
     count: int = 0
 
     model_config = ConfigDict(extra="forbid")
+
+
+# ── Slice 5: frontend-facing endpoints ────────────────────────────
+
+
+class UserIdentityResponse(BaseModel):
+    """Response of ``GET /api/me`` — used by the frontend to render
+    the user badge and gate signed-in-only routes.
+
+    In prod, Azure Container Apps Easy Auth injects
+    ``X-MS-CLIENT-PRINCIPAL-*`` headers that the backend reads; in
+    dev/stub mode the same shape is derived from the bearer token so
+    the frontend can talk to ``serve_smoke.py`` locally.
+    """
+
+    authenticated: bool
+    clinician_id: str | None = None
+    name: str | None = None
+    roles: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThreadMessageView(BaseModel):
+    """One persisted message in a thread — clinician-visible only."""
+
+    role: str
+    content: str
+    timestamp: datetime
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ThreadDetailResponse(BaseModel):
+    """Response of ``GET /threads/{thread_id}`` — full transcript for
+    resuming a chat after refresh (B-009)."""
+
+    thread_id: str
+    patient_id: str
+    title: str | None = None
+    created_at: datetime
+    last_activity: datetime
+    messages: list[ThreadMessageView] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")

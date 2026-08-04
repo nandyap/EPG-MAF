@@ -797,3 +797,24 @@ later without changing template shape.
 
 
 
+
+## B-009 - Chat-history persistence on refresh
+
+**Status:** ANSWERED (2026-08-04, closed in-house)
+**Owners (customer side):** none - resolved by MAF port Slice 5.
+**Blocks:** UX regression: refreshing the chat window lost the transcript.
+**Raised:** 2026-07-24
+
+### Resolution
+
+Slice 5 wires the frontend to the backend and adds a new endpoint`GET /threads/{thread_id}` that returns the full transcript for a thread. The `POST /chat` handler now appends both the user message and the assistant reply (including scope-guard refusals) to the persisted `SessionDocument.messages` list before returning.
+
+On refresh the `[thread_id]` page calls `GET /threads/{id}` and hydrates the transcript. Cross-clinician and unknown-thread lookups return HTTP 404 `patient_unavailable` (identical shape), preserving the enumeration defence used elsewhere.
+
+Backed by:
+
+- `epg-maf/src/egp_maf/api/app.py` - new route + persistence helpers`_persist_turn_messages` / `_persist_refusal_messages`.
+- `epg-maf/src/egp_maf/api/schemas.py` - `ThreadDetailResponse` +`ThreadMessageView`.
+- `epg-maf/tests/unit/api/test_slice5_endpoints.py` - 7 tests covering owner / unknown / cross-clinician / missing-bearer paths.
+- `epg-maf/egp_frontend/app/threads/[thread_id]/page.tsx` - transcript hydration on mount.
+
