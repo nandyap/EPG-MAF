@@ -1,0 +1,78 @@
+[
+  {
+    "id": "golden.s11.pgx_all_normal",
+    "domain": "pgx",
+    "question": "What is the pharmacogenomic profile for patient HG04011?",
+    "patient_id": "HG04011",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "HG04011" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "Normal Metabolizer",
+      "CYP2C19",
+      "CYP2C9",
+      "CYP2D6",
+      "DPYD",
+      "SLCO1B1",
+      "TPMT"
+    ],
+    "tags": ["pgx", "normal", "golden_s11", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s12.pgx_cyp2d6_rapid_metabolizer",
+    "domain": "pgx",
+    "question": "Summarise the PGx results for patient HG04012. Are there any actionable drug-gene interactions?",
+    "patient_id": "HG04012",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "HG04012" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "CYP2D6",
+      "Rapid Metabolizer",
+      "codeine"
+    ],
+    "tags": ["pgx", "actionable", "golden_s12", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s13.pgx_cyp2c19_poor",
+    "domain": "pgx",
+    "question": "Does patient HG04013 have any pharmacogenomic findings that affect drug prescribing?",
+    "patient_id": "HG04013",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "HG04013" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "CYP2C19",
+      "Poor Metabolizer",
+      "clopidogrel"
+    ],
+    "tags": ["pgx", "actionable", "golden_s13", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s14.pgx_slco1b1_intermediate",
+    "domain": "pgx",
+    "question": "Report pharmacogenomic status for patient HG04014 with any relevant drug recommendations.",
+    "patient_id": "HG04014",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_pgx", "tool_parameters": { "patient_id": "HG04014" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "SLCO1B1",
+      "Intermediate Metabolizer",
+      "simvastatin"
+    ],
+    "tags": ["pgx", "actionable", "golden_s14", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  }
+]

@@ -62,10 +62,24 @@ class GoldenItem(BaseModel):
     # every substring in ``expected_refusal_substrings`` (case-insensitive)
     # and that ``agents_completed`` is empty.
     expected_refusal_substrings: list[str] = Field(default_factory=list)
+    # Slice 4: content-shape assertions on the reply text.
+    # ``expected_fact_substrings`` are substrings that MUST appear
+    # (case-insensitive). ``forbidden_substrings`` are substrings that
+    # MUST NOT appear (case-sensitive so PHI matches are exact).
+    # Zero-tolerance policy on the forbidden list — one match is a
+    # hard fail.
+    expected_fact_substrings: list[str] = Field(default_factory=list)
+    forbidden_substrings: list[str] = Field(default_factory=list)
     # Free-form tags for filtering (``edge_case``, ``privacy``,
     # ``multi_domain``, ``dispatch_mode_parity``, ``scope_guard``,
-    # ``cohort_allowed``, ``noeval_disclosure``, etc.).
+    # ``cohort_allowed``, ``noeval_disclosure``, ``phi_redaction``,
+    # ``cross_domain``, ``awaiting-compass``, etc.).
     tags: list[str] = Field(default_factory=list)
+    # Slice 4: items whose passing requires the real Compass LLM.
+    # When set, the harness treats a failing content-scorer as an
+    # expected-fail rather than a real failure. Cleared once the LLM
+    # key arrives and the item genuinely passes.
+    expected_fail_reason: str | None = None
     # BIX sign-off metadata. Empty until the SME approves.
     bix_reviewed: bool = False
     bix_reviewer: str | None = None

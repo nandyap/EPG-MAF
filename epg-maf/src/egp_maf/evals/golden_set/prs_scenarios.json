@@ -1,0 +1,80 @@
+[
+  {
+    "id": "golden.s1.prs_high_evaluated",
+    "domain": "prs",
+    "question": "What is the polygenic risk score for breast cancer for patient HG04001?",
+    "patient_id": "HG04001",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "HG04001" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "PRS313_BC",
+      "1.82",
+      "95",
+      "very high",
+      "EGP"
+    ],
+    "tags": ["prs", "evaluated", "golden_s1", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM to synthesise the narrative",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s2.prs_average_evaluated",
+    "domain": "prs",
+    "question": "Summarise the PRS results for patient HG04002.",
+    "patient_id": "HG04002",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "HG04002" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "PRS313_BC",
+      "0.12",
+      "55",
+      "average",
+      "EGP"
+    ],
+    "tags": ["prs", "evaluated", "golden_s2", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s3.prs_low_evaluated",
+    "domain": "prs",
+    "question": "Does patient HG04003 have any polygenic risk scores? What do they indicate?",
+    "patient_id": "HG04003",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "HG04003" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "PRS313_BC",
+      "-1.45",
+      "10",
+      "low",
+      "EGP"
+    ],
+    "tags": ["prs", "evaluated", "golden_s3", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s4.prs_not_egp_evaluated",
+    "domain": "prs",
+    "question": "What is the breast cancer PRS for patient HG04004? Has it been assessed for the EGP cohort?",
+    "patient_id": "HG04004",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_prs", "tool_parameters": { "patient_id": "HG04004" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "PRS_BC_NOEVAL",
+      "not been evaluated",
+      "EGP cohort"
+    ],
+    "tags": ["prs", "noeval_disclosure", "golden_s4", "gap_3", "awaiting-compass"],
+    "expected_fail_reason": "Gap 3 disclosure requires real LLM to read annotation notes field",
+    "bix_reviewed": false
+  }
+]

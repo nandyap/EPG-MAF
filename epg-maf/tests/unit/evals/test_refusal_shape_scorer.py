@@ -108,18 +108,18 @@ class TestGoldenSetContainsScopeItems:
         items = load_golden_set()
         scope_items = [i for i in items if i.domain == "scope_guard"]
         assert {i.id for i in scope_items} >= {
-            "scope.g1.cross_patient",
-            "scope.g2.cohort_scan",
-            "scope.g6.annotation_cohort_allowed",
+            "golden.g1.cross_patient",
+            "golden.g2.cohort_scan_count",
+            "golden.g6.annotation_cohort_allowed",
         }
 
     def test_refusal_items_have_expected_substrings(self) -> None:
         items = load_golden_set()
-        g1 = next(i for i in items if i.id == "scope.g1.cross_patient")
+        g1 = next(i for i in items if i.id == "golden.g1.cross_patient")
         assert g1.expected_refusal_substrings
         assert any("start a new chat" in s.lower() for s in g1.expected_refusal_substrings)
 
     def test_cohort_allowed_item_has_no_expected_substrings(self) -> None:
         items = load_golden_set()
-        g6 = next(i for i in items if i.id == "scope.g6.annotation_cohort_allowed")
+        g6 = next(i for i in items if i.id == "golden.g6.annotation_cohort_allowed")
         assert g6.expected_refusal_substrings == []

@@ -1,0 +1,61 @@
+[
+  {
+    "id": "golden.s5.brca1_pathogenic_frameshift",
+    "domain": "genomic_variants",
+    "question": "Report all genomic variants for patient HG04005 with their clinical annotations.",
+    "patient_id": "HG04005",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "HG04005" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "BRCA1",
+      "frameshift",
+      "Pathogenic",
+      "chr17:43057051",
+      "heterozygous"
+    ],
+    "tags": ["genomic_variants", "pathogenic", "golden_s5", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s6.brca1_vus_missense",
+    "domain": "genomic_variants",
+    "question": "Does patient HG04006 carry any variants in BRCA1? Are they clinically significant?",
+    "patient_id": "HG04006",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "HG04006" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "BRCA1",
+      "missense",
+      "VUS",
+      "chr17:43091983",
+      "gnomAD"
+    ],
+    "tags": ["genomic_variants", "vus", "golden_s6", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s7.brca1_likely_benign_synonymous",
+    "domain": "genomic_variants",
+    "question": "What variants does patient HG04007 carry? Assess their pathogenicity.",
+    "patient_id": "HG04007",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_genomic_variants", "tool_parameters": { "patient_id": "HG04007" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "BRCA1",
+      "synonymous",
+      "benign",
+      "chr17:43094464"
+    ],
+    "tags": ["genomic_variants", "benign", "golden_s7", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM",
+    "bix_reviewed": false
+  }
+]

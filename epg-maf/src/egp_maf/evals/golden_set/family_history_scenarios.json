@@ -1,0 +1,86 @@
+[
+  {
+    "id": "golden.s8.family_history_met_high_quality",
+    "domain": "family_history",
+    "question": "Does patient HG04008 have a family history of hereditary breast cancer? How reliable is the assessment?",
+    "patient_id": "HG04008",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_family_history", "tool_parameters": { "patient_id": "HG04008" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "NCCN",
+      "threshold is met",
+      "high quality"
+    ],
+    "forbidden_substrings": [
+      "mother",
+      "sister",
+      "aunt",
+      "grandmother",
+      "cousin",
+      "age 47",
+      "age 52",
+      "age 63",
+      "age 71",
+      "MRN"
+    ],
+    "tags": ["family_history", "met", "phi_redaction", "golden_s8", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM; PHI-redaction shape is enforced by W03 family-history privacy layer",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s9.family_history_not_met_low_quality",
+    "domain": "family_history",
+    "question": "What is the family history status for breast cancer for patient HG04009?",
+    "patient_id": "HG04009",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_family_history", "tool_parameters": { "patient_id": "HG04009" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "NCCN",
+      "not met",
+      "unreliable"
+    ],
+    "forbidden_substrings": [
+      "mother",
+      "sister",
+      "father",
+      "brother",
+      "aunt",
+      "uncle",
+      "cousin",
+      "MRN"
+    ],
+    "tags": ["family_history", "not_met", "low_quality", "phi_redaction", "golden_s9", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM; PHI-redaction shape is enforced by W03 family-history privacy layer",
+    "bix_reviewed": false
+  },
+  {
+    "id": "golden.s10.family_history_not_met_high_quality",
+    "domain": "family_history",
+    "question": "Report the family history assessment for patient HG04010.",
+    "patient_id": "HG04010",
+    "expected_tool_calls": [
+      { "tool_name": "get_patient_family_history", "tool_parameters": { "patient_id": "HG04010" } }
+    ],
+    "expected_output_keys": ["output", "output.results"],
+    "expected_fact_substrings": [
+      "NCCN",
+      "not met",
+      "high quality"
+    ],
+    "forbidden_substrings": [
+      "mother",
+      "sister",
+      "aunt",
+      "grandmother",
+      "cousin",
+      "MRN"
+    ],
+    "tags": ["family_history", "not_met", "high_quality", "phi_redaction", "golden_s10", "awaiting-compass"],
+    "expected_fail_reason": "content-quality requires real LLM; PHI-redaction shape is enforced by W03 family-history privacy layer",
+    "bix_reviewed": false
+  }
+]

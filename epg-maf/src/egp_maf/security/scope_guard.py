@@ -60,8 +60,8 @@ _DEFAULT_ID_PATTERNS: tuple[str, ...] = (
 _COHORT_SCAN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bhow many\s+patients?\b", re.I),
     re.compile(r"\bhow many\s+carriers?\b", re.I),
-    re.compile(r"\bwhat\s+percentage\s+of\s+patients?\b", re.I),
-    re.compile(r"\bwhat\s+proportion\s+of\s+(?:the\s+)?(?:cohort|patients?)\b", re.I),
+    re.compile(r"\bwhat\s+percentage\s+of\b.{0,40}?\bpatients?\b", re.I),
+    re.compile(r"\bwhat\s+proportion\s+of\b.{0,40}?\b(?:cohort|patients?)\b", re.I),
     re.compile(r"\bmost\s+common\s+.+\s+in\s+(?:this\s+)?(?:database|cohort)\b", re.I),
     re.compile(r"\bcompare\b.{0,80}?\bto\s+other\s+patients?\b", re.I),
     re.compile(r"\bcompare\b.{0,80}?\bacross\s+(?:the\s+)?(?:cohort|patients?)\b", re.I),
