@@ -1,0 +1,49 @@
+# azd project file — EGP MAF (backend + frontend Container Apps).
+#
+# The Bicep template deploys INTO an existing landing zone. Before
+# ``azd up``, the intake in ``docs/deployment.md`` must be complete
+# and the placeholder tokens in ``infra/env/<env>.bicepparam`` must be
+# populated.
+#
+# Docs: https://learn.microsoft.com/azure/developer/azure-developer-cli/
+
+name: egp-maf
+metadata:
+  template: egp-maf@0.1.0
+
+# Point at the environment-specific parameter file. azd resolves this
+# to the file at ``infra/env/${AZURE_ENV_NAME}.bicepparam``.
+infra:
+  provider: bicep
+  path: infra
+  module: env/${AZURE_ENV_NAME}
+
+services:
+  backend:
+    project: ./epg-maf
+    language: python
+    host: containerapp
+    docker:
+      path: Dockerfile
+      context: .
+  frontend:
+    project: ./epg-maf/egp_frontend
+    language: ts
+    host: containerapp
+    docker:
+      path: Dockerfile
+      context: .
+
+hooks:
+  # After Bicep provisioning, verify the ``sessions`` Cosmos container
+  # exists and the backend health endpoint responds. Non-fatal on
+  # failure — the runbook does deeper verification.
+  postprovision:
+    windows:
+      shell: pwsh
+      run: ./scripts/deploy_postprovision.ps1
+      continueOnError: true
+    posix:
+      shell: sh
+      run: ./scripts/deploy_postprovision.sh
+      continueOnError: true

@@ -818,3 +818,27 @@ Backed by:
 - `epg-maf/tests/unit/api/test_slice5_endpoints.py` - 7 tests covering owner / unknown / cross-clinician / missing-bearer paths.
 - `epg-maf/egp_frontend/app/threads/[thread_id]/page.tsx` - transcript hydration on mount.
 
+
+
+### 2026-08-04 Update — Slice 6 shipped the template
+
+The Bicep template and azd wiring are now in place under `../infra/`
+and `../azure.yaml` (repo root). What ships today:
+
+- `infra/main.bicep` — RG-scoped, "deploy INTO existing landing zone"
+  pattern. Creates only UAMI, backend + frontend Container Apps, RBAC
+  assignments, and the Cosmos database + ``sessions`` container.
+- `infra/modules/` — one file per concern (identity, rbac, containerapp
+  backend/frontend, cosmos, split rbac helpers).
+- `infra/env/{dev,preprod,prod}.bicepparam` — all params filled with
+  ``{{PLACEHOLDER}}`` tokens matching the intake table below.
+- `epg-maf/Dockerfile` + `epg-maf/egp_frontend/Dockerfile` — production
+  images (non-root, multi-stage, healthchecks).
+- `azure.yaml` — azd project mapping backend + frontend to Container
+  Apps with environment-scoped bicepparam selection.
+- `scripts/deploy_postprovision.{ps1,sh}` — post-provision smoke.
+- `docs/deployment.md` — full runbook (prereqs, Postgres AAD bootstrap,
+  Easy Auth enablement, rollback, local docker build).
+
+**Still blocked on the answers below** — every ``{{PLACEHOLDER}}`` in
+the bicepparam files must be filled in before ``azd up`` can run.
