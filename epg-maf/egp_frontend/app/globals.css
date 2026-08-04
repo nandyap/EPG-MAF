@@ -1,23 +1,104 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  /* Winter palette — restrained blues, ice, slate. */
+  --background: #eef2f7;
+  --foreground: #0f1e34;
   --card: #ffffff;
-  --border: #e2e8f0;
-  --primary: #0369a1;
-  --primary-fg: #ffffff;
-  --muted: #64748b;
+  --card-tinted: #f6f8fb;
+  --border: #dde3ec;
+  --border-soft: #e7ebf2;
+
+  /* Brand — deep steel blue, used sparingly. */
+  --brand-50:  #eef2f8;
+  --brand-100: #dbe4f0;
+  --brand-200: #b9c9e0;
+  --brand-500: #4a6a94;
+  --brand-600: #385478;
+  --brand-700: #2a4162;
+  --brand-800: #1f3250;
+
+  /* User bubble — soft periwinkle so it reads warm without going brown. */
+  --user-bg-a: #e4ecf7;
+  --user-bg-b: #d7e2f2;
+  --user-fg:   #223452;
+  --user-border: #cad8ec;
+
+  /* Assistant bubble — palest ice, tinted just enough to lift off the panel. */
+  --asst-bg-a: #f6f9fc;
+  --asst-bg-b: #eef3f9;
+  --asst-fg:   #17263f;
+  --asst-border: #e3e9f2;
+
+  --muted: #5b6577;
   --danger: #b91c1c;
   --warn: #b45309;
+
+  --shadow-panel:
+    0 1px 2px rgba(16, 24, 40, 0.04),
+    0 8px 24px rgba(16, 24, 40, 0.05);
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04);
 }
 
 html,
 body {
-  background: var(--background);
+  /* Very soft winter sky — pale blue at the top eases to icy grey.
+     Fixed attachment so scrolling doesn't reveal a plain white edge. */
+  background:
+    linear-gradient(180deg, #e3ecf7 0%, #eff2f7 55%, #e6ebf3 100%);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    var(--font-inter), "Inter", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.brand-mark {
+  font-family:
+    var(--font-space-grotesk), "Space Grotesk", "Inter", ui-sans-serif,
+    system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--brand-800);
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-panel);
+}
+
+.hair-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--border) 20%,
+    var(--border) 80%,
+    transparent
+  );
+}
+
+/* ── Chat bubbles ────────────────────────────────────────────────── */
+.bubble-user {
+  background: linear-gradient(180deg, var(--user-bg-a), var(--user-bg-b));
+  color: var(--user-fg);
+  border: 1px solid var(--user-border);
+}
+
+.bubble-assistant {
+  background: linear-gradient(180deg, var(--asst-bg-a), var(--asst-bg-b));
+  color: var(--asst-fg);
+  border: 1px solid var(--asst-border);
+}
+
+:where(button, input, textarea, a):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 106, 148, 0.22);
+  border-radius: 8px;
 }
 
 * {

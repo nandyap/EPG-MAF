@@ -15,18 +15,20 @@ export function ChatSidebar({
   const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside className="panel flex h-full w-72 shrink-0 flex-col overflow-hidden">
       <div className="p-3">
         <button
           onClick={onNewChat}
-          className="w-full rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800"
+          className="w-full rounded-lg bg-[color:var(--brand-700)] px-3 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[color:var(--brand-800)]"
         >
           + New chat
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2">
-        <h2 className="px-2 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      <div className="hair-divider mx-3" />
+
+      <div className="flex-1 overflow-y-auto px-2 pt-2">
+        <h2 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
           Recent chats
         </h2>
         {loading && (
@@ -43,10 +45,10 @@ export function ChatSidebar({
             return (
               <li key={t.thread_id}>
                 <div
-                  className={`group flex items-center gap-1 rounded-md px-2 py-2 text-sm ${
+                  className={`group flex items-center gap-1 rounded-lg px-2 py-2 text-sm transition ${
                     active
-                      ? "bg-sky-50 text-sky-900"
-                      : "text-slate-700 hover:bg-slate-100"
+                      ? "bg-[color:var(--brand-50)] text-[color:var(--brand-800)] ring-1 ring-[color:var(--brand-100)]"
+                      : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
                   <Link href={href} className="flex-1 truncate">

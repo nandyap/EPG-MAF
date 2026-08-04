@@ -14,10 +14,8 @@ export function ChatMessage({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[75%] rounded-lg px-4 py-3 text-sm ${
-          isUser
-            ? "bg-sky-700 text-white"
-            : "border border-slate-200 bg-white text-slate-800"
+        className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-sm ${
+          isUser ? "bubble-user" : "bubble-assistant"
         }`}
       >
         {isUser ? (

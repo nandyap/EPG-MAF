@@ -46,28 +46,30 @@ export function NewChatModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
       <form
         onSubmit={submit}
-        className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg"
+        className="panel w-full max-w-md p-6"
       >
-        <h2 className="text-lg font-semibold">Start a new chat</h2>
+        <h2 className="brand-mark text-lg">Start a new chat</h2>
         <p className="mt-1 text-sm text-slate-600">
           The chat will be pinned to this patient. This cannot be changed
           later.
         </p>
 
-        <label className="mt-4 block text-sm font-medium">Patient ID</label>
+        <label className="mt-4 block text-sm font-medium text-slate-700">
+          Patient ID
+        </label>
         <input
           type="text"
           required
           value={patientId}
           onChange={(e) => setPatientId(e.target.value)}
           placeholder="PGP001"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-[color:var(--brand-500)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-100)]"
         />
 
-        <label className="mt-4 block text-sm font-medium">
+        <label className="mt-4 block text-sm font-medium text-slate-700">
           Title <span className="text-slate-400">(optional)</span>
         </label>
         <input
@@ -75,11 +77,11 @@ export function NewChatModal({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Family history review"
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+          className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm focus:border-[color:var(--brand-500)] focus:outline-none focus:ring-2 focus:ring-[color:var(--brand-100)]"
         />
 
         {error && (
-          <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-100">
             {error}
           </p>
         )}
@@ -88,14 +90,14 @@ export function NewChatModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md px-4 py-2 text-sm hover:bg-slate-100"
+            className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy || !patientId.trim()}
-            className="rounded-md bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+            className="rounded-lg bg-[color:var(--brand-700)] px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-[color:var(--brand-800)] disabled:opacity-50"
           >
             {busy ? "Starting…" : "Start chat"}
           </button>
