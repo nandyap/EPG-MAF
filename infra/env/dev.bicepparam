@@ -1,40 +1,47 @@
 using '../main.bicep'
 
-// ── DEV ─────────────────────────────────────────────────────────────
-// Placeholder values — replace {{...}} tokens from the B-008 intake.
-// See ``docs/deployment.md``.
+// Deploys the EGP MAF backend + frontend Container Apps into the
+// dev landing-zone RG ``rg-ailz-egpwin-dev-m42-aen-001``.
+//
+// Every existing resource referenced below lives in the same RG.
+// Postgres is the exception — it sits in a separate RG under the
+// same subscription and is reached via VNet private endpoint. Bicep
+// doesn't touch it; the backend connects to it at runtime using the
+// UAMI's AAD token.
+//
+// See ``docs/deployment.md`` for the full runbook.
 
 param env = 'dev'
 param projectPrefix = 'egpmaf'
-// Region defaults to resourceGroup().location; override if the RG is
-// in a different region than the CAE.
-// param location = 'uaenorth'
+// Region defaults to resourceGroup().location; the RG is in uaenorth.
 
-// Images built by ``azd package`` and pushed to ACR by ``azd deploy``.
-// Tag placeholder — azd substitutes at deploy time.
-param backendImage  = '{{ACR_LOGIN_SERVER}}/egp-maf-backend:{{TAG}}'
-param frontendImage = '{{ACR_LOGIN_SERVER}}/egp-maf-frontend:{{TAG}}'
+// Images built + pushed by ``azd deploy``. Tag substituted at deploy time.
+param backendImage  = 'crailzegpwindevm42aen001.azurecr.io/egp-maf-backend:{{TAG}}'
+param frontendImage = 'crailzegpwindevm42aen001.azurecr.io/egp-maf-frontend:{{TAG}}'
 
-// Existing landing-zone resources (see B-008).
-param containerAppsEnvironmentName = '{{CAE_NAME}}'
-param containerRegistryName        = '{{ACR_NAME}}'
-param containerRegistryResourceGroup = '{{ACR_RG}}'
-param cosmosAccountName            = '{{COSMOS_ACCOUNT}}'
-param cosmosResourceGroup          = '{{COSMOS_RG}}'
-param keyVaultName                 = '{{KEYVAULT_NAME}}'
-param keyVaultResourceGroup        = '{{KEYVAULT_RG}}'
-param logAnalyticsWorkspaceId      = '{{LOG_ANALYTICS_WORKSPACE_ID}}'
+// Existing landing-zone resources (all in the same dev RG).
+param containerAppsEnvironmentName   = 'cae-ailz-egpwin-dev-m42-aen-001'
+param containerRegistryName          = 'crailzegpwindevm42aen001'
+param containerRegistryResourceGroup = 'rg-ailz-egpwin-dev-m42-aen-001'
+param cosmosAccountName              = 'cosmos-ailz-egpwin-dev-m42-aen-001'
+param cosmosResourceGroup            = 'rg-ailz-egpwin-dev-m42-aen-001'
+param keyVaultName                   = 'kvailzegpwindevm42aen001'
+param keyVaultResourceGroup          = 'rg-ailz-egpwin-dev-m42-aen-001'
+// Log Analytics: not wired yet. Bicep skips diagnostic settings when empty.
+param logAnalyticsWorkspaceId        = ''
 
 // Backend runtime config.
-param postgresHost       = '{{POSTGRES_FQDN}}'
-param postgresDatabase   = 'egp'
-param llmEndpoint        = '{{APIM_LLM_ENDPOINT}}'
-param llmApiKeySecretName = 'llm-api-key'
+param postgresHost        = 'psql-egpwin-agent-prd-m42-aen.postgres.database.azure.com'
+param postgresDatabase    = 'egp_window'
+param llmEndpoint         = '{{APIM_LLM_ENDPOINT}}'  // fill from customer before azd up
+param llmApiKeySecretName = 'llm-api-key'            // KV secret name (value seeded out of band)
 
-// Dev-only sizing + flags.
+// Sizing.
 param backendMinReplicas  = 1
 param backendMaxReplicas  = 3
 param frontendMinReplicas = 1
 param frontendMaxReplicas = 3
-param authStubEnabled     = true
-param orchDispatchMode    = 'sequential'
+
+// Feature flags — dev.
+param authStubEnabled  = true
+param orchDispatchMode = 'sequential'
