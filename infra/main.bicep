@@ -102,6 +102,9 @@ param authStubEnabled bool = false
 @allowed([ 'sequential', 'parallel' ])
 param orchDispatchMode string = 'sequential'
 
+@description('If true, backend fails fast when Postgres pool cannot open at startup. Set false during rollout when the DB is not yet reachable in the VNet.')
+param postgresStartupRequired bool = true
+
 // ── Derived names ──────────────────────────────────────────────────
 var uamiName        = '${projectPrefix}-${env}-uami'
 var backendAppName  = '${projectPrefix}-${env}-backend'
@@ -178,6 +181,7 @@ module backend 'modules/containerapp-backend.bicep' = {
     llmEndpoint: llmEndpoint
     authStubEnabled: authStubEnabled
     orchDispatchMode: orchDispatchMode
+    postgresStartupRequired: postgresStartupRequired
     logAnalyticsWorkspaceId: logAnalyticsWorkspaceId
   }
   dependsOn: [ rbac, cosmosContainers ]

@@ -45,3 +45,8 @@ param frontendMaxReplicas = 3
 // Feature flags — dev.
 param authStubEnabled  = true
 param orchDispatchMode = 'sequential'
+// DB is not yet reachable in the landing-zone VNet (migration to
+// psql-ailz-egpwin-dev-m42-aen-001 pending). Let the backend boot so
+// pure-LLM chat + scope-guard refusals work; specialist queries will
+// surface DatabaseUnavailable at request time until this flips to true.
+param postgresStartupRequired = false

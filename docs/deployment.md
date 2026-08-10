@@ -85,16 +85,36 @@ azd up
 ## 4. Post-provision — Postgres AAD role
 
 Bicep can't `CREATE ROLE` in Postgres. Run this **once per environment**
-after the first deploy, connected as the Postgres AAD admin:
+after the first `azd up`, from the **jump VM inside the VNet** (the
+Postgres server is behind a private endpoint and unreachable from
+outside), connected as a Postgres AAD admin.
+
+The backend is **read-only** on the clinical DB — writes go to Cosmos,
+not Postgres. So we grant `SELECT` only.
 
 ```sql
--- egp-maf-<env> is the UAMI display name (see main.bicep).
-CREATE ROLE "egp-maf-dev" WITH LOGIN IN ROLE azure_ad_user;
-GRANT CONNECT ON DATABASE egp TO "egp-maf-dev";
-GRANT USAGE ON SCHEMA public TO "egp-maf-dev";
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "egp-maf-dev";
+-- Role name matches the UAMI Bicep creates:
+--   projectPrefix-env-uami  ->  egpmaf-dev-uami
+CREATE ROLE "egpmaf-dev-uami" WITH LOGIN IN ROLE azure_ad_user;
+GRANT CONNECT ON DATABASE egp_window TO "egpmaf-dev-uami";
+GRANT USAGE ON SCHEMA public TO "egpmaf-dev-uami";
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO "egpmaf-dev-uami";
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "egp-maf-dev";
+  GRANT SELECT ON TABLES TO "egpmaf-dev-uami";
+```
+
+The first `azd up` will crash-loop the backend Container App with
+`FATAL: role "egpmaf-dev-uami" does not exist` — that's expected.
+After running the SQL above, restart the revision:
+
+```powershell
+az containerapp revision restart `
+  --name egpmaf-dev-backend `
+  --resource-group rg-ailz-egpwin-dev-m42-aen-001 `
+  --revision $(az containerapp show `
+    --name egpmaf-dev-backend `
+    --resource-group rg-ailz-egpwin-dev-m42-aen-001 `
+    --query "properties.latestRevisionName" -o tsv)
 ```
 
 ## 5. Enable Container Apps Easy Auth (frontend)

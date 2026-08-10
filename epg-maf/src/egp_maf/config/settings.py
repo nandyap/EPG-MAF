@@ -89,6 +89,16 @@ class Settings(BaseSettings):
         default=4_000, alias="POSTGRES_CONNECT_MAX_DELAY_MS", ge=0, le=30_000
     )
 
+    # When False, a Postgres connect failure at startup is logged and
+    # the app boots anyway; specialist queries later surface
+    # ``DatabaseUnavailable``. Set to True in prod to fail-fast on
+    # misconfiguration; keep False during early rollouts where the DB
+    # is not yet reachable but pure-LLM chat + refusals should still
+    # work.
+    postgres_startup_required: bool = Field(
+        default=True, alias="POSTGRES_STARTUP_REQUIRED"
+    )
+
     # Migrator role (Alembic / CI only — never used by the runtime app).
     postgres_migrator_user: str | None = Field(default=None, alias="POSTGRES_MIGRATOR_USER")
     postgres_migrator_password: SecretStr | None = Field(

@@ -133,12 +133,26 @@ class Container:
             await self.cosmos_client_factory.open()
             _logger.info("container.startup.cosmos_open")
 
-            await self.db_pool_factory.open()
-            _logger.info(
-                "container.startup.db_pool_open",
-                min_size=self.settings.postgres_pool_min_size,
-                max_size=self.settings.postgres_pool_max_size,
-            )
+            # Postgres pool open is best-effort at startup so the
+            # backend can still boot for pure-LLM chat + scope-guard
+            # refusals when the DB is unreachable (e.g. cross-VNet
+            # setup pending). Specialist queries will surface
+            # DatabaseUnavailable at request time instead. See
+            # POSTGRES_STARTUP_REQUIRED.
+            try:
+                await self.db_pool_factory.open()
+                _logger.info(
+                    "container.startup.db_pool_open",
+                    min_size=self.settings.postgres_pool_min_size,
+                    max_size=self.settings.postgres_pool_max_size,
+                )
+            except Exception as db_exc:
+                if self.settings.postgres_startup_required:
+                    raise
+                _logger.warning(
+                    "container.startup.db_pool_open_deferred",
+                    error=str(db_exc),
+                )
 
             await self.prompt_service.warm()
             _logger.info(
