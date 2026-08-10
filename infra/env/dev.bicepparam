@@ -33,7 +33,7 @@ param logAnalyticsWorkspaceId        = ''
 // Backend runtime config.
 param postgresHost        = 'psql-egpwin-agent-prd-m42-aen.postgres.database.azure.com'
 param postgresDatabase    = 'egp_window'
-param llmEndpoint         = '{{APIM_LLM_ENDPOINT}}'  // fill from customer before azd up
+param llmEndpoint         = 'https://api.core42.ai/v1'  // Compass / Core42 API base URL
 param llmApiKeySecretName = 'llm-api-key'            // KV secret name (value seeded out of band)
 
 // Sizing.
