@@ -24,6 +24,10 @@ services:
     docker:
       path: Dockerfile
       context: .
+    # Bind this service to the Container App the Bicep template
+    # provisions. The name must match ``${projectPrefix}-${env}-backend``
+    # in main.bicep (currently ``egpmaf-dev-backend``).
+    resourceName: egpmaf-dev-backend
   frontend:
     project: ./epg-maf/egp_frontend
     language: ts
@@ -31,6 +35,7 @@ services:
     docker:
       path: Dockerfile
       context: .
+    resourceName: egpmaf-dev-frontend
 
 hooks:
   # After Bicep provisioning, verify the ``sessions`` Cosmos container

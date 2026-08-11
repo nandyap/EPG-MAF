@@ -15,9 +15,15 @@ param env = 'dev'
 param projectPrefix = 'egpmaf'
 // Region defaults to resourceGroup().location; the RG is in uaenorth.
 
-// Images built + pushed by ``azd deploy``. Tag substituted at deploy time.
-param backendImage  = 'crailzegpwindevm42aen001.azurecr.io/egp-maf-backend:{{TAG}}'
-param frontendImage = 'crailzegpwindevm42aen001.azurecr.io/egp-maf-frontend:{{TAG}}'
+// Images built + pushed by ``azd`` during ``package`` phase. On each
+// deploy azd exports the fully-qualified image reference (with the
+// tag it generated) as ``SERVICE_<NAME>_IMAGE_NAME``, and Bicep reads
+// it here. The second arg is a fallback only used when you run
+// ``azd provision`` standalone before ever packaging — in that case
+// Container Apps preflight will reject the tag, which is the correct
+// signal to run ``azd up`` or ``azd package && azd provision``.
+param backendImage  = readEnvironmentVariable('SERVICE_BACKEND_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
+param frontendImage = readEnvironmentVariable('SERVICE_FRONTEND_IMAGE_NAME', 'mcr.microsoft.com/k8se/quickstart:latest')
 
 // Existing landing-zone resources (all in the same dev RG).
 param containerAppsEnvironmentName   = 'cae-ailz-egpwin-dev-m42-aen-001'
