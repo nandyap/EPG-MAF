@@ -111,9 +111,17 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           ]
           probes: [
             {
+              type: 'Startup'
+              httpGet: { path: '/health', port: 8080 }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 30 // ~5 min for cold start (Cosmos + LLM warm-up)
+            }
+            {
               type: 'Liveness'
               httpGet: { path: '/health', port: 8080 }
-              initialDelaySeconds: 15
+              initialDelaySeconds: 30
               periodSeconds: 30
               timeoutSeconds: 5
               failureThreshold: 3
@@ -121,7 +129,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             {
               type: 'Readiness'
               httpGet: { path: '/health', port: 8080 }
-              initialDelaySeconds: 5
+              initialDelaySeconds: 10
               periodSeconds: 10
               timeoutSeconds: 3
               failureThreshold: 3
