@@ -12,7 +12,12 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+# ``npm ci`` is strict about lockfile parity; add --include=optional so
+# Linux-only platform binaries (sharp, etc.) are pulled even when the
+# lockfile was last regenerated on a different OS. Falls back to
+# ``npm install`` if the lockfile drifts — safer for CI.
+RUN npm ci --no-audit --no-fund --include=optional \
+ || npm install --no-audit --no-fund
 
 # ── 2. Builder ───────────────────────────────────────────────────────
 FROM node:20-alpine AS builder
