@@ -1,4 +1,4 @@
-using '../main.bicep'
+using 'main.bicep'
 
 // Deploys the EGP MAF backend + frontend Container Apps into the
 // dev landing-zone RG ``rg-ailz-egpwin-dev-m42-aen-001``.
