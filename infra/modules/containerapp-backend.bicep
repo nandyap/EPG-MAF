@@ -39,10 +39,13 @@ param postgresUser string
 param cosmosEndpoint string
 param cosmosDatabase string
 
-@description('Key Vault URI, e.g. ``https://mykv.vault.azure.net/``.')
+@description('Key Vault URI, e.g. ``https://mykv.vault.azure.net/``. Retained for downstream code that reads other secrets from KV via UAMI; not used for the LLM key in this deploy.')
 param keyVaultUri string
-param llmApiKeySecretName string
 param llmEndpoint string
+
+@secure()
+@description('Compass API key. Injected directly as an app secret + LLM_API_KEY env var (Plan B — Container Apps KV secret reference via UAMI proved unreliable in this landing zone).')
+param llmApiKey string
 
 param authStubEnabled bool
 param orchDispatchMode string
@@ -79,8 +82,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       secrets: [
         {
           name: 'llm-api-key'
-          keyVaultUrl: '${keyVaultUri}secrets/${llmApiKeySecretName}'
-          identity: uamiId
+          value: llmApiKey
         }
       ]
     }

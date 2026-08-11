@@ -74,8 +74,9 @@ param cosmosDatabase string = 'egp'
 @description('Compass / APIM endpoint URL for LLM access.')
 param llmEndpoint string
 
-@description('Name of the Key Vault secret holding the LLM API key.')
-param llmApiKeySecretName string = 'llm-api-key'
+@secure()
+@description('Compass API key. Passed to the backend Container App as an app secret + LLM_API_KEY env var. Read from the AZURE_LLM_API_KEY env var by main.bicepparam.')
+param llmApiKey string
 
 // ── Sizing ─────────────────────────────────────────────────────────
 @description('Minimum backend replicas.')
@@ -177,7 +178,7 @@ module backend 'modules/containerapp-backend.bicep' = {
     cosmosEndpoint: cosmos.properties.documentEndpoint
     cosmosDatabase: cosmosDatabase
     keyVaultUri: kv.properties.vaultUri
-    llmApiKeySecretName: llmApiKeySecretName
+    llmApiKey: llmApiKey
     llmEndpoint: llmEndpoint
     authStubEnabled: authStubEnabled
     orchDispatchMode: orchDispatchMode

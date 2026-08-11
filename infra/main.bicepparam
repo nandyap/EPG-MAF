@@ -40,7 +40,12 @@ param logAnalyticsWorkspaceId        = ''
 param postgresHost        = 'psql-egpwin-agent-prd-m42-aen.postgres.database.azure.com'
 param postgresDatabase    = 'egp_window'
 param llmEndpoint         = 'https://api.core42.ai/v1'  // Compass / Core42 API base URL
-param llmApiKeySecretName = 'llm-api-key'            // KV secret name (value seeded out of band)
+// Plan B — the KV secret reference via UAMI proved unreliable in this
+// landing zone (see notes in modules/containerapp-backend.bicep). We
+// pass the key straight from the operator's environment to Bicep as a
+// @secure() param, and it lands as an app secret on the Container App.
+// Set once locally:  $env:AZURE_LLM_API_KEY = "<key>"   before ``azd up``.
+param llmApiKey           = readEnvironmentVariable('AZURE_LLM_API_KEY', '')
 
 // Sizing.
 param backendMinReplicas  = 1
