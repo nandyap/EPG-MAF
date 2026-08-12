@@ -37,7 +37,11 @@ param keyVaultResourceGroup          = 'rg-ailz-egpwin-dev-m42-aen-001'
 param logAnalyticsWorkspaceId        = ''
 
 // Backend runtime config.
-param postgresHost        = 'psql-egpwin-agent-prd-m42-aen.postgres.database.azure.com'
+// Customer moved egp_window onto the landing-zone Postgres server —
+// same VNet as the CAE, so Container Apps reach it via the existing
+// private endpoint (once the customer registers the DNS record in
+// their hub for privatelink.postgres.database.azure.com).
+param postgresHost        = 'psql-ailz-egpwin-dev-m42-aen-001.postgres.database.azure.com'
 param postgresDatabase    = 'egp_window'
 param llmEndpoint         = 'https://api.core42.ai/v1'  // Compass / Core42 API base URL
 // Plan B — the KV secret reference via UAMI proved unreliable in this
