@@ -24,6 +24,7 @@ services:
     docker:
       path: Dockerfile
       context: .
+      remoteBuild: true
     # Bind this service to the Container App the Bicep template
     # provisions. The name must match ``${projectPrefix}-${env}-backend``
     # in main.bicep (currently ``egpmaf-dev-backend``).
@@ -35,6 +36,7 @@ services:
     docker:
       path: Dockerfile
       context: .
+      remoteBuild: true
     resourceName: egpmaf-dev-frontend
 
 hooks:
