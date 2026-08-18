@@ -23,6 +23,12 @@ RUN npm ci --no-audit --no-fund --include=optional \
 FROM node:20-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# NEXT_PUBLIC_* vars are baked into the client bundle at build time.
+# In dev/pilot we ship a stub bearer so the frontend can authenticate
+# against the backend's StubAuthenticator without Entra Easy Auth.
+# MUST remain empty in production images.
+ARG NEXT_PUBLIC_DEV_BEARER=""
+ENV NEXT_PUBLIC_DEV_BEARER=$NEXT_PUBLIC_DEV_BEARER
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

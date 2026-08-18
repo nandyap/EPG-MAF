@@ -37,6 +37,12 @@ services:
       path: Dockerfile
       context: .
       remoteBuild: true
+      # NEXT_PUBLIC_DEV_BEARER must be baked into the client bundle at
+      # build time so the browser can send it as Authorization: Bearer.
+      # Set NEXT_PUBLIC_DEV_BEARER in the azd env before ``azd deploy
+      # frontend`` (see docs/deployment.md).
+      buildArgs:
+        - NEXT_PUBLIC_DEV_BEARER
     resourceName: egpmaf-dev-frontend
 
 hooks:
