@@ -55,6 +55,10 @@ param postgresStartupRequired bool = true
 @description('Log Analytics workspace id for diagnostic settings. Empty = skip.')
 param logAnalyticsWorkspaceId string = ''
 
+@description('JSON string for the authz allowlist. Mounted at /mnt/authz/allowlist.json and pointed to via EGP_AUTHZ_ALLOWLIST_PATH. Empty = no allowlist (fails closed).')
+@secure()
+param authzAllowlistJson string = ''
+
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
@@ -84,6 +88,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'llm-api-key'
           value: llmApiKey
         }
+        {
+          name: 'authz-allowlist'
+          value: empty(authzAllowlistJson) ? '{"version":1,"clinicians":{},"admins":[]}' : authzAllowlistJson
+        }
       ]
     }
     template: {
@@ -108,6 +116,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'LLM_API_KEY', secretRef: 'llm-api-key' }
             { name: 'AUTH_STUB_ENABLED', value: string(authStubEnabled) }
             { name: 'ORCH_DISPATCH_MODE', value: orchDispatchMode }
+            { name: 'EGP_AUTHZ_ALLOWLIST_PATH', value: '/mnt/authz/allowlist.json' }
           ]
           probes: [
             {
@@ -133,6 +142,24 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
               periodSeconds: 10
               timeoutSeconds: 3
               failureThreshold: 3
+            }
+          ]
+          volumeMounts: [
+            {
+              volumeName: 'authz'
+              mountPath: '/mnt/authz'
+            }
+          ]
+        }
+      ]
+      volumes: [
+        {
+          name: 'authz'
+          storageType: 'Secret'
+          secrets: [
+            {
+              secretRef: 'authz-allowlist'
+              path: 'allowlist.json'
             }
           ]
         }

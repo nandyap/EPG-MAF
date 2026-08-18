@@ -65,3 +65,11 @@ param orchDispatchMode = 'sequential'
 // pure-LLM chat + scope-guard refusals work; specialist queries will
 // surface DatabaseUnavailable at request time until this flips to true.
 param postgresStartupRequired = false
+
+// Dev allowlist — clinician "demo" (matches NEXT_PUBLIC_DEV_BEARER oid)
+// is an admin, so it can access every patient in the seed DB. Rebuild
+// tighten for pilot per B-007.
+param authzAllowlistJson = readEnvironmentVariable(
+  'AZURE_AUTHZ_ALLOWLIST_JSON',
+  '{"version":1,"clinicians":{"demo":["HG00096","HG00097","HG04001","HG04004","PGP001","NA12878"]},"admins":["demo"]}'
+)

@@ -106,6 +106,10 @@ param orchDispatchMode string = 'sequential'
 @description('If true, backend fails fast when Postgres pool cannot open at startup. Set false during rollout when the DB is not yet reachable in the VNet.')
 param postgresStartupRequired bool = true
 
+@description('JSON string for the authz allowlist. Mounted at /mnt/authz/allowlist.json inside the backend container. Empty = deny-all (fail closed).')
+@secure()
+param authzAllowlistJson string = ''
+
 // ── Derived names ──────────────────────────────────────────────────
 var uamiName        = '${projectPrefix}-${env}-uami'
 var backendAppName  = '${projectPrefix}-${env}-backend'
@@ -184,6 +188,7 @@ module backend 'modules/containerapp-backend.bicep' = {
     orchDispatchMode: orchDispatchMode
     postgresStartupRequired: postgresStartupRequired
     logAnalyticsWorkspaceId: logAnalyticsWorkspaceId
+    authzAllowlistJson: authzAllowlistJson
   }
   dependsOn: [ rbac, cosmosContainers ]
 }
