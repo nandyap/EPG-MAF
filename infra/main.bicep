@@ -65,7 +65,7 @@ param postgresHost string
 @description('Postgres database name.')
 param postgresDatabase string = 'egp'
 
-@description('Postgres AAD login. Defaults to the UAMI display name (``${projectPrefix}-${env}-uami``) — must match the Postgres role we grant SELECT to (see docs/deployment.md).')
+@description('Postgres AAD login. Defaults to the UAMI display name (must match the Postgres role granted SELECT — see docs/deployment.md).')
 param postgresAadLogin string = '${projectPrefix}-${env}-uami'
 
 @description('Cosmos database name for session/thread state.')
