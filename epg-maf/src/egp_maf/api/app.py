@@ -21,6 +21,7 @@ instance whose ``POST /chat`` route:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -70,10 +71,21 @@ def create_app(container: Container) -> FastAPI:
     ``container`` is a fully-built :class:`egp_maf.di.container.Container`
     (via :func:`build_container`) whose singletons this app closes over.
     """
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        # Open Cosmos client, Postgres pool, PromptService, telemetry.
+        await container.startup()
+        try:
+            yield
+        finally:
+            await container.shutdown()
+
     app = FastAPI(
         title="EGP Window",
         description="Clinical genomics decision-support agent",
         version="0.1.0",
+        lifespan=_lifespan,
     )
     app.state.container = container
 
