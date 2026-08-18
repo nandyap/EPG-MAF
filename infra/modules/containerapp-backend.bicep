@@ -111,6 +111,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
             { name: 'COSMOS_DATABASE', value: cosmosDatabase }
             { name: 'COSMOS_CONTAINER', value: 'sessions' }
+            { name: 'COSMOS_USE_MANAGED_IDENTITY', value: 'true' }
             { name: 'KEY_VAULT_URI', value: keyVaultUri }
             { name: 'LLM_ENDPOINT', value: llmEndpoint }
             { name: 'LLM_API_KEY', secretRef: 'llm-api-key' }
