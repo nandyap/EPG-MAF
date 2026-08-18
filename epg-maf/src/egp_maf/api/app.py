@@ -690,11 +690,15 @@ async def _egp_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, EgpError)
     trace_id, _ = get_current_trace_and_span_ids()
     envelope = format_error_response(exc, trace_id=trace_id)
-    _logger.warning(
+    # Log the full chain (including the underlying azure.cosmos / psycopg
+    # exception) at INFO/exception level so operators can diagnose real
+    # runtime problems. The response body still uses the generic envelope.
+    _logger.exception(
         "http.egp_error",
         error_code=envelope.error_code,
         http_status=envelope.http_status,
         trace_id=trace_id,
+        exc_info=exc,
     )
     return JSONResponse(
         status_code=envelope.http_status,
