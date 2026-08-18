@@ -112,7 +112,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           probes: [
             {
               type: 'Startup'
-              httpGet: { path: '/health', port: 8080 }
+              httpGet: { path: '/healthz', port: 8080 }
               initialDelaySeconds: 10
               periodSeconds: 10
               timeoutSeconds: 5
@@ -120,7 +120,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Liveness'
-              httpGet: { path: '/health', port: 8080 }
+              httpGet: { path: '/healthz', port: 8080 }
               initialDelaySeconds: 30
               periodSeconds: 30
               timeoutSeconds: 5
@@ -128,7 +128,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               type: 'Readiness'
-              httpGet: { path: '/health', port: 8080 }
+              httpGet: { path: '/healthz', port: 8080 }
               initialDelaySeconds: 10
               periodSeconds: 10
               timeoutSeconds: 3
