@@ -60,11 +60,10 @@ param frontendMaxReplicas = 3
 // Feature flags — dev.
 param authStubEnabled  = true
 param orchDispatchMode = 'sequential'
-// DB is not yet reachable in the landing-zone VNet (migration to
-// psql-ailz-egpwin-dev-m42-aen-001 pending). Let the backend boot so
-// pure-LLM chat + scope-guard refusals work; specialist queries will
-// surface DatabaseUnavailable at request time until this flips to true.
-param postgresStartupRequired = false
+// DB is now reachable in the landing-zone VNet with the UAMI granted
+// SELECT on public via ``pgaadauth``. Fail-fast on startup so a bad
+// deploy surfaces immediately rather than at request time.
+param postgresStartupRequired = true
 
 // Dev allowlist — clinician "demo" (matches NEXT_PUBLIC_DEV_BEARER oid)
 // is an admin, so it can access every patient in the seed DB. Rebuild

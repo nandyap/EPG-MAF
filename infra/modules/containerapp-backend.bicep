@@ -107,6 +107,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'POSTGRES_DATABASE', value: postgresDatabase }
             { name: 'POSTGRES_USER', value: postgresUser }
             { name: 'POSTGRES_AUTH_MODE', value: 'aad' }
+            { name: 'POSTGRES_USE_MANAGED_IDENTITY', value: 'true' }
             { name: 'POSTGRES_STARTUP_REQUIRED', value: string(postgresStartupRequired) }
             { name: 'COSMOS_ENDPOINT', value: cosmosEndpoint }
             { name: 'COSMOS_DATABASE', value: cosmosDatabase }

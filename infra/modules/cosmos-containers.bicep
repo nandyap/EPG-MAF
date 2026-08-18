@@ -1,7 +1,8 @@
 // Cosmos database + ``sessions`` container, created on the existing
-// Cosmos account. Partition key ``/patient_id`` matches
-// ``SessionDocument.patient_id`` and is required by the query patterns
-// in ``egp_maf.services.thread_state``.
+// Cosmos account. Partition key ``/clinician_id`` matches the read
+// patterns in ``egp_maf.services.thread_state``: reads, queries and
+// deletes all use ``partition_key=clinician_id``. Writes derive the
+// PK from the persisted ``SessionDocument.clinician_id`` field.
 
 @description('Cosmos account name (in the current RG scope).')
 param cosmosAccountName string
@@ -36,7 +37,7 @@ resource sessions 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers
     resource: {
       id: 'sessions'
       partitionKey: {
-        paths: [ '/patient_id' ]
+        paths: [ '/clinician_id' ]
         kind: 'Hash'
         version: 2
       }
