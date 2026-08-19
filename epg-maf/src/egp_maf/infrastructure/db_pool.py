@@ -247,43 +247,50 @@ class DbPoolFactory:
         """Build the psycopg conninfo string.
 
         Password resolution:
-        - If ``postgres_use_managed_identity`` is true, obtain a token from the
-          injected ``token_provider`` (or ``DefaultAzureCredential`` in prod).
+        - If ``postgres_use_managed_identity`` is true, the password is an
+          Entra token supplied per connection by :meth:`_connection_class`
+          — see the note there on why it must not be frozen in here.
         - Else use the static ``postgres_password``.
 
-        Statement timeout is applied server-side via ``options=-c
-        statement_timeout=...``.
+        Statement timeout is applied server-side via the libpq ``options``
+        parameter. The value contains a space (``-c statement_timeout=…``),
+        and in a conninfo string a bare space separates key=value pairs —
+        so hand-joining produced ``options=-c`` followed by a stray
+        ``statement_timeout=30000``, which libpq rejects with
+
+            invalid connection option "statement_timeout"
+
+        Every connection then failed instantly, ``pool.open(wait=True)``
+        never reached ``min_size``, and the pool surfaced ``PoolTimeout``
+        — indistinguishable from an unreachable host. We build the string
+        with :func:`psycopg.conninfo.make_conninfo`, which quotes values
+        correctly, instead of joining by hand.
         """
+        from psycopg.conninfo import make_conninfo  # type: ignore[import-untyped]
+
         s = self._settings
-        # Under managed identity the password is an Entra token supplied
-        # per connection by ``_connection_class`` — see the note there on
-        # why it must not be frozen into this string.
-        password: str | None
+        params: dict[str, Any] = {
+            "host": s.postgres_host,
+            "port": s.postgres_port,
+            "dbname": s.postgres_database,
+            "user": s.postgres_user,
+            "sslmode": s.postgres_ssl_mode,
+            # statement_timeout is milliseconds server-side.
+            "options": f"-c statement_timeout={s.postgres_statement_timeout_seconds * 1000}",
+            "application_name": "egp-maf",
+        }
+
         if s.postgres_use_managed_identity:
-            password = None
+            pass  # token supplied per connection
         elif s.postgres_password is not None:
-            password = s.postgres_password.get_secret_value()
+            params["password"] = s.postgres_password.get_secret_value()
         else:
             raise ConfigurationError(
                 "Postgres credentials missing: set POSTGRES_PASSWORD or "
                 "POSTGRES_USE_MANAGED_IDENTITY=true."
             )
 
-        # statement_timeout is milliseconds server-side.
-        stmt_ms = s.postgres_statement_timeout_seconds * 1000
-        # Use keyword=value form (psycopg parses it correctly).
-        parts = [
-            f"host={s.postgres_host}",
-            f"port={s.postgres_port}",
-            f"dbname={s.postgres_database}",
-            f"user={s.postgres_user}",
-            f"sslmode={s.postgres_ssl_mode}",
-            f"options=-c statement_timeout={stmt_ms}",
-            "application_name=egp-maf",
-        ]
-        if password is not None:
-            parts.insert(4, f"password={password}")
-        return " ".join(parts)
+        return make_conninfo(**params)
 
     def _acquire_token(self) -> str:
         """Acquire an Entra ID token to use as the Postgres password."""

@@ -35,6 +35,7 @@ from egp_maf.agents.base import (
     SpecialistReactResult,
     ToolCall,
 )
+from egp_maf.agents.extraction_schema import strict_extraction_schema
 from egp_maf.telemetry import llm_span
 
 _logger = logging.getLogger(__name__)
@@ -93,6 +94,14 @@ class MafSpecialistLlm(SpecialistLlm):
         ]
         messages.append(_text_msg("user", request.extraction_instruction))
 
+        # Structured Outputs is strict: it rejects the free-form objects
+        # inside ``DBProvenance`` (``dict[str, Any]``). The model must not
+        # author provenance anyway — it is built at query time by the
+        # Repository and attached afterwards — so we ask for a
+        # provenance-free variant and validate the reply back into the
+        # real schema. See :mod:`egp_maf.agents.extraction_schema`.
+        wire_schema = strict_extraction_schema(request.response_schema)
+
         with llm_span(
             model=self._agent_id, phase="extract", structured_output=True
         ):
@@ -100,7 +109,7 @@ class MafSpecialistLlm(SpecialistLlm):
                 messages,
                 options=ChatOptions(
                     temperature=self._temperature,
-                    response_format=request.response_schema,
+                    response_format=wire_schema,
                 ),
             )
 
@@ -108,7 +117,9 @@ class MafSpecialistLlm(SpecialistLlm):
         # parsed model instance when ``response_format`` is a BaseModel.
         parsed = getattr(response, "value", None)
         if parsed is not None:
-            return parsed
+            return request.response_schema.model_validate(  # type: ignore[attr-defined]
+                parsed.model_dump()
+            )
 
         # Fallback: parse the string content as JSON (belt-and-braces).
         text = _extract_text_from_response(response)
