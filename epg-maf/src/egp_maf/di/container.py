@@ -45,6 +45,10 @@ from egp_maf.services.repositories import (
     PRSRepository,
 )
 from egp_maf.services.thread_state import ThreadStateProvider
+from egp_maf.workflow.chat.synthesize_response import (
+    StubSynthesisLlm,
+    SynthesisLlm,
+)
 from egp_maf.workflow.decisions import ChatRouterDecision, SpecialistDispatchSet
 from egp_maf.workflow.router_llm import (
     OrchRouterLlm,
@@ -52,7 +56,9 @@ from egp_maf.workflow.router_llm import (
     StubOrchRouterLlm,
     StubRouterLlm,
 )
+from egp_maf.workflow.router_llm_maf import MafChatRouterLlm, MafOrchRouterLlm
 from egp_maf.workflow.runtime import WorkflowRuntime
+from egp_maf.workflow.synthesis_llm_maf import MafSynthesisLlm
 
 _logger = get_logger(__name__)
 
@@ -195,18 +201,26 @@ def build_container(
     *,
     chat_router_llm: RouterLlm | None = None,
     orch_router_llm: OrchRouterLlm | None = None,
+    synthesis_llm: "SynthesisLlm | None" = None,
+    use_stub_llms: bool = False,
 ) -> Container:
     """Wire the application container.
 
     Bindings are declared here — one place to trace every dependency.
 
-    The two router-LLM keyword arguments are the seam for W05: the caller
-    (production main / tests) passes real Compass-backed implementations.
-    When omitted, the container is wired with harmless stubs so that
-    integration tests (and W04 smoke runs) can exercise the workflow
-    without an LLM. The stubs emit a single ``end`` decision, which
-    means the orchestration loop exits immediately without any specialist
-    dispatch — useful as a health check, not as a workflow simulation.
+    The three LLM keyword arguments are injection seams: pass a double to
+    replace any single stage. Anything not supplied is built as a **real
+    Compass-backed implementation** — the chat router, the orchestration
+    router and the synthesis step all reach the model by default.
+
+    Set ``use_stub_llms=True`` for offline smoke runs. The stubs short-circuit
+    the workflow: the chat router always answers "no clinical data needed",
+    the orchestration router ends immediately without dispatching a
+    specialist, and synthesis returns a canned ``STUB: <query>`` string.
+    That combination exercises the plumbing but is **not** a functional
+    system, so it must never be the production default — it previously was,
+    which meant deployed builds answered every clinical question with the
+    canned string and never called a specialist.
     """
     resolved_settings = settings or get_settings()
     configure_logging(resolved_settings)
@@ -255,16 +269,55 @@ def build_container(
         resolved_settings, audit=audit_emitter
     )
 
-    # Router LLMs — defaults are safe stubs; production supplies real ones.
-    resolved_chat_router: RouterLlm = chat_router_llm or StubRouterLlm(
-        ChatRouterDecision(
-            needs_clinical_data=False,
-            reason="default stub — no clinical data needed",
-            reset_agents=[],
+    # ── LLM stages ────────────────────────────────────────────────
+    # Real Compass-backed implementations unless explicitly overridden.
+    # Model choice per stage comes from AGENT_LLM_CONFIGS: the chat router
+    # and synthesis run on the ``chat`` model, the orchestration router on
+    # ``main`` — matching the prototype's stratification.
+    def _stub_chat_router() -> RouterLlm:
+        return StubRouterLlm(
+            ChatRouterDecision(
+                needs_clinical_data=False,
+                reason="stub — no clinical data needed",
+                reset_agents=[],
+            )
         )
-    )
-    resolved_orch_router: OrchRouterLlm = orch_router_llm or StubOrchRouterLlm(
-        [SpecialistDispatchSet(specialists=[], reason="default stub — immediate end")]
+
+    def _stub_orch_router() -> OrchRouterLlm:
+        return StubOrchRouterLlm(
+            [SpecialistDispatchSet(specialists=[], reason="stub — immediate end")]
+        )
+
+    if use_stub_llms:
+        resolved_chat_router: RouterLlm = chat_router_llm or _stub_chat_router()
+        resolved_orch_router: OrchRouterLlm = orch_router_llm or _stub_orch_router()
+        resolved_synthesis: SynthesisLlm = synthesis_llm or StubSynthesisLlm()
+    else:
+        resolved_chat_router = chat_router_llm or MafChatRouterLlm(
+            client=llm_client_factory.get("chat"),
+            system_prompt=prompt_service.get("chat_router"),
+            temperature=llm_client_factory.config_for("chat").temperature,
+        )
+        resolved_orch_router = orch_router_llm or MafOrchRouterLlm(
+            client=llm_client_factory.get("main"),
+            system_prompt=prompt_service.get("main_agent"),
+            temperature=llm_client_factory.config_for("main").temperature,
+        )
+        resolved_synthesis = synthesis_llm or MafSynthesisLlm(
+            client=llm_client_factory.get("chat"),
+            system_prompt=prompt_service.get("chat_synthesis"),
+            model_label=llm_client_factory.config_for("chat").model,
+            temperature=llm_client_factory.config_for("chat").temperature,
+        )
+
+    # Make the active mode unambiguous in the logs — a stubbed deployment
+    # looks healthy but answers nothing, so it must be visible at boot.
+    _logger.info(
+        "container.llm_wiring",
+        mode="stub" if use_stub_llms else "compass",
+        chat_router=type(resolved_chat_router).__name__,
+        orch_router=type(resolved_orch_router).__name__,
+        synthesis=type(resolved_synthesis).__name__,
     )
 
     # Specialists (W05). Each is bound to the shared Repository +
@@ -314,6 +367,7 @@ def build_container(
         settings=resolved_settings,
         chat_router_llm=resolved_chat_router,
         orch_router_llm=resolved_orch_router,
+        synthesis_llm=resolved_synthesis,
         specialist_registry=specialist_registry,
         metric_emitter=metric_emitter,
     )

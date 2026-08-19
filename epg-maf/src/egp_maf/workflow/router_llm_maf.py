@@ -16,6 +16,7 @@ from typing import Any
 from agent_framework import ChatOptions, Content, Message
 from agent_framework.openai import OpenAIChatClient
 
+from egp_maf.telemetry import llm_span
 from egp_maf.workflow.decisions import (
     ChatRouterDecision,
     SpecialistDispatchSet,
@@ -76,15 +77,17 @@ class MafChatRouterLlm:
             "Decide whether the current message requires fresh clinical "
             "data. Respond via the ChatRouterDecision schema."
         )
-        response = await self._client.get_response(
-            [_msg("system", self._system_prompt), _msg("user", user_msg)],
-            options=ChatOptions(
-                temperature=self._temperature,
-                response_format=ChatRouterDecision,
-            ),
-        )
+        with llm_span(
+            model="chat_router", phase="route", structured_output=True
+        ):
+            response = await self._client.get_response(
+                [_msg("system", self._system_prompt), _msg("user", user_msg)],
+                options=ChatOptions(
+                    temperature=self._temperature,
+                    response_format=ChatRouterDecision,
+                ),
+            )
         return _parse_decision(response, ChatRouterDecision)
-
 
 class MafOrchRouterLlm:
     """Real MAF-backed :class:`OrchRouterLlm` for the orchestration
@@ -117,11 +120,14 @@ class MafOrchRouterLlm:
             "specialists list to end the orchestration. Respond via the "
             "SpecialistDispatchSet schema."
         )
-        response = await self._client.get_response(
-            [_msg("system", self._system_prompt), _msg("user", user_msg)],
-            options=ChatOptions(
-                temperature=self._temperature,
-                response_format=SpecialistDispatchSet,
-            ),
-        )
+        with llm_span(
+            model="orch_router", phase="route", structured_output=True
+        ):
+            response = await self._client.get_response(
+                [_msg("system", self._system_prompt), _msg("user", user_msg)],
+                options=ChatOptions(
+                    temperature=self._temperature,
+                    response_format=SpecialistDispatchSet,
+                ),
+            )
         return _parse_decision(response, SpecialistDispatchSet)
