@@ -96,11 +96,19 @@ class FakePool:
 
 
 class FakePoolFactory:
-    """Duck-typed as ``DbPoolFactory`` — exposes ``.pool``."""
+    """Duck-typed as ``DbPoolFactory`` — exposes ``.pool`` and ``get_pool()``.
+
+    ``BaseRepository`` awaits ``get_pool()`` so the pool can be opened on
+    demand (and recover after a failed startup connect). The synchronous
+    ``pool`` property is kept for callers that already hold an open pool.
+    """
 
     def __init__(self, pool: FakePool) -> None:
         self.fake_pool = pool
 
     @property
     def pool(self) -> FakePool:
+        return self.fake_pool
+
+    async def get_pool(self) -> FakePool:
         return self.fake_pool

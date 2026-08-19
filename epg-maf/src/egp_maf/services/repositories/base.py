@@ -71,7 +71,7 @@ class BaseRepository:
         success so dashboards can partition read latency by result
         size.
         """
-        pool = self._pool_factory.pool
+        pool = await self._pool_factory.get_pool()
         table = _infer_table(sql)
         with db_span(table=table, operation="SELECT") as _span:
             try:

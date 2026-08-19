@@ -25,16 +25,28 @@ class TestDbPoolFactoryConnInfo:
         assert "statement_timeout=30000" in info
         assert "application_name=egp-maf" in info
 
-    def test_managed_identity_uses_token_provider(
+    def test_managed_identity_omits_password_from_conninfo(
         self, monkeypatch: pytest.MonkeyPatch, minimal_env: None
     ) -> None:
+        """Under managed identity the password must NOT be in the conninfo.
+
+        It used to be: ``_build_conninfo`` called the token provider once and
+        froze the result into the string. The pool then reused that string
+        for every connection it opened later, so once the Entra token
+        expired (~60-90 min) every new connection failed to authenticate --
+        the app worked for an hour and then degraded silently.
+
+        The token is now supplied per connection by the connection class
+        returned from ``_connection_class``.
+        """
         monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
         monkeypatch.setenv("POSTGRES_USE_MANAGED_IDENTITY", "true")
         s = Settings()  # type: ignore[call-arg]
 
         f = DbPoolFactory(s, token_provider=lambda: "aad-token-value")
         info = f._build_conninfo()  # noqa: SLF001
-        assert "password=aad-token-value" in info
+        assert "password=" not in info
+        assert f._connection_class() is not None  # noqa: SLF001
 
     def test_missing_credentials_raises(
         self, monkeypatch: pytest.MonkeyPatch, minimal_env: None

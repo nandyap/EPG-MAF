@@ -104,6 +104,12 @@ class _FakePoolFactory(DbPoolFactory):
     def pool(self) -> Any:  # type: ignore[override]
         return self._fake_pool
 
+    async def get_pool(self) -> Any:  # type: ignore[override]
+        # ``BaseRepository`` opens the pool on demand. The fake is always
+        # "open", so hand it straight back without touching the real
+        # lazy-open path (this double never calls ``super().__init__``).
+        return self._fake_pool
+
 
 def _ctx() -> ClinicianContext:
     return ClinicianContext(clinician_id="c1", tenant_id="t1", roles=frozenset({"Clinician"}))
