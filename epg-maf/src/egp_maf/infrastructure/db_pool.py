@@ -105,9 +105,20 @@ class DbPoolFactory:
             self._pool = await retry_async(policy, _open_once)
         except Exception as exc:  # pragma: no cover — exercised in integration
             _logger.error("db.pool.open_failed", exc_info=exc)
+            # Surface the underlying driver error in the message itself.
+            # The chained ``__cause__`` is only visible if the full
+            # traceback survives, and in Container Apps the log stream is
+            # frequently truncated — leaving operators with a wrapper that
+            # says "failed" but not *why*. psycopg's message distinguishes
+            # DNS / timeout / auth / missing-database, which are four very
+            # different fixes. It does not echo the connection password.
             raise DatabaseUnavailable(
                 f"Failed to open Postgres pool for {self._settings.postgres_host} "
-                f"after {self._settings.postgres_connect_max_attempts} attempts"
+                f"(db={self._settings.postgres_database}, "
+                f"user={self._settings.postgres_user}, "
+                f"managed_identity={self._settings.postgres_use_managed_identity}) "
+                f"after {self._settings.postgres_connect_max_attempts} attempts: "
+                f"{type(exc).__name__}: {exc}"
             ) from exc
 
     async def close(self) -> None:

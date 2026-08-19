@@ -60,10 +60,23 @@ param frontendMaxReplicas = 3
 // Feature flags — dev.
 param authStubEnabled  = true
 param orchDispatchMode = 'sequential'
-// DB is now reachable in the landing-zone VNet with the UAMI granted
-// SELECT on public via ``pgaadauth``. Fail-fast on startup so a bad
-// deploy surfaces immediately rather than at request time.
-param postgresStartupRequired = true
+// Postgres connectivity from the Container Apps environment is NOT yet
+// proven. The only revision that has ever reached a Running state
+// (``--azd-1787066521``) carries POSTGRES_STARTUP_REQUIRED=False; it is
+// healthy because it tolerates the failure, not because the DB is
+// reachable. Flipping this to true (commit 73c4de3) assumed the private
+// endpoint + pgaadauth role were working, and that assumption was never
+// validated — every revision since has crashed on boot in
+// ``DbPoolFactory.open`` and Container Apps has held traffic on the last
+// good revision.
+//
+// Keep this false until a connection from inside the CAE is
+// demonstrated (see docs/deployment.md). While false, the backend boots
+// and specialist queries surface DatabaseUnavailable per-request, which
+// W09 isolates into a failed specialist slot rather than a crash.
+// Flip back to true once the DB path is confirmed, so a genuinely bad
+// deploy fails fast.
+param postgresStartupRequired = false
 
 // Dev allowlist — clinician "demo" (matches NEXT_PUBLIC_DEV_BEARER oid)
 // is an admin, so it can access every patient in the seed DB. Rebuild
