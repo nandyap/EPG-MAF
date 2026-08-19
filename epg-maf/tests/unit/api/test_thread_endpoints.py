@@ -47,7 +47,17 @@ class _NoopFactory:
 
 
 class _NoopPrompts:
-    async def warm_cache(self) -> None: ...
+    # Mirrors the real ``PromptService`` surface used by
+    # ``Container.startup``. ``warm_cache`` was the old name and had
+    # drifted from the implementation, so any test that ran the app
+    # lifespan (rather than just calling routes) failed with
+    # AttributeError.
+    async def warm(self) -> None: ...
+
+    @property
+    def fallback_count(self) -> int:
+        return 0
+
     def get(self, name: str) -> str:
         return f"prompt:{name}"
 

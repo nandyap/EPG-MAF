@@ -54,6 +54,7 @@ from egp_maf.errors import (
 from egp_maf.logging.setup import get_logger
 from egp_maf.resilience import format_error_response
 from egp_maf.state.clinician_context import ClinicianContext
+from egp_maf.state.session_document import SessionDocument
 from egp_maf.telemetry.otel import get_current_trace_and_span_ids
 from egp_maf.telemetry.spans import workflow_request_span
 from egp_maf.workflow.state import (
@@ -129,7 +130,11 @@ def create_app(container: Container) -> FastAPI:
             # ``body.patient_id`` must equal the ``patient_id`` recorded
             # on the thread at creation time. A new patient means a new
             # thread. See ADR B-002 + B-005.
-            await _enforce_thread_pin(
+            #
+            # Returns the loaded document so the turn reads Cosmos once:
+            # the pin check, the history hydration below and the
+            # write-back afterwards all share it.
+            thread_doc = await _enforce_thread_pin(
                 container=container,
                 ctx=ctx,
                 body_thread_id=body.thread_id,
@@ -172,6 +177,7 @@ def create_app(container: Container) -> FastAPI:
                     thread_id=body.thread_id,
                     user_message=body.message,
                     refusal_reply=scope_decision.refusal_message or "",
+                    doc=thread_doc,
                 )
                 return _refusal_response(
                     body=body,
@@ -179,6 +185,14 @@ def create_app(container: Container) -> FastAPI:
                     trace_id=trace_id_early,
                 )
 
+            # Rehydrate the conversation and the cached specialist state
+            # from the thread. Without this every turn looks like the
+            # first one: the chat router sees no history and no cached
+            # domains, so it can neither resolve a follow-up question
+            # ("what about her sister?") nor skip a specialist that
+            # already ran. ``ChatWorkflowState`` has always documented
+            # itself as "rehydrated from SessionDocument at start of
+            # turn" — this is the code that makes that true.
             initial = ChatWorkflowState(
                 ctx=ctx,
                 patient_id=body.patient_id,
@@ -187,8 +201,13 @@ def create_app(container: Container) -> FastAPI:
                 requested_diseases=body.requested_diseases,
                 requested_genes=body.requested_genes,
                 messages=[
-                    SessionMessage(role="user", content=body.message)
+                    *_history_from(thread_doc),
+                    SessionMessage(role="user", content=body.message),
                 ],
+                agents_completed=list(
+                    thread_doc.agents_completed if thread_doc else []
+                ),
+                **_slots_from(thread_doc),
             )
 
             result = await container.workflow_runtime.run_turn(initial)
@@ -205,6 +224,7 @@ def create_app(container: Container) -> FastAPI:
                 thread_id=body.thread_id,
                 user_message=body.message,
                 final=final,
+                doc=thread_doc,
             )
 
             return _project_response(final, trace_id=trace_id)
@@ -464,12 +484,16 @@ async def _enforce_thread_pin(
     body_thread_id: str,
     body_patient_id: str,
     body_message: str = "",
-) -> None:
+) -> "SessionDocument | None":
     """Ensure ``body_patient_id`` matches the thread's pinned patient.
+
+    Returns the loaded (or freshly created) :class:`SessionDocument` so the
+    caller can rehydrate conversation history and cached specialist state
+    without a second Cosmos read.
 
     Three cases:
 
-    - Thread exists and patient matches → return silently.
+    - Thread exists and patient matches → return it.
     - Thread exists and patient differs → raise
       :class:`ThreadPatientMismatch` (409).
     - Thread does not exist yet:
@@ -481,14 +505,14 @@ async def _enforce_thread_pin(
         ``POST /threads`` first.
     """
     provider = container.thread_state_provider
-    pinned = await provider.get_patient_id(body_thread_id, ctx.clinician_id)
+    existing = await provider.load(body_thread_id, ctx.clinician_id)
 
-    if pinned is not None:
-        if pinned != body_patient_id:
+    if existing is not None:
+        if existing.patient_id != body_patient_id:
             _logger.warning(
                 "chat.thread_patient_mismatch",
                 thread_id=body_thread_id,
-                thread_patient_id=pinned,
+                thread_patient_id=existing.patient_id,
                 body_patient_id=body_patient_id,
                 clinician_id=ctx.clinician_id,
             )
@@ -496,13 +520,13 @@ async def _enforce_thread_pin(
                 f"This chat is pinned to a different patient. "
                 f"Please start a new chat for patient {body_patient_id}."
             )
-        return
+        return existing
 
     # Thread does not exist.
     if container.settings.auth_stub_enabled:
         # Dev-only convenience: auto-create so the smoke server can be
         # driven with a bare POST /chat.
-        await provider.create_thread(
+        created = await provider.create_thread(
             clinician_id=ctx.clinician_id,
             tenant_id=ctx.tenant_id,
             patient_id=body_patient_id,
@@ -516,7 +540,7 @@ async def _enforce_thread_pin(
             patient_id=body_patient_id,
             reason="auth_stub_enabled",
         )
-        return
+        return created
 
     _logger.warning(
         "chat.thread_not_found",
@@ -565,6 +589,71 @@ def _extract_final_state(run_result: Any) -> ChatWorkflowState:
         if isinstance(out, ChatWorkflowState):
             return out
     raise EgpError("Workflow produced no terminal ChatWorkflowState output")
+
+
+# Conversation history forwarded into the workflow. The full transcript
+# stays in Cosmos and is still returned by ``GET /threads/{id}``; this cap
+# only bounds what reaches the router and synthesis prompts, so a long
+# thread cannot grow the context window (and the per-turn cost) without
+# limit. Turns are user+assistant pairs, so this is ~10 exchanges.
+_MAX_HISTORY_MESSAGES = 20
+
+
+def _history_from(doc: "SessionDocument | None") -> list[SessionMessage]:
+    """Return the tail of the persisted transcript for prompt context.
+
+    The current user message is appended by the caller, so it is not
+    included here.
+    """
+    if doc is None or not doc.messages:
+        return []
+    return list(doc.messages[-_MAX_HISTORY_MESSAGES:])
+
+
+def _slots_from(doc: "SessionDocument | None") -> dict[str, SpecialistSlot]:
+    """Rebuild cached specialist slots from the persisted document.
+
+    Enables the chat router's cache-invalidation contract (ADR-009): it
+    can only decide *not* to re-run a specialist if it can see that one
+    already produced output on an earlier turn.
+
+    A slot that fails to validate (schema drift from an older thread) is
+    dropped rather than failing the turn — the specialist simply re-runs.
+    """
+    if doc is None or not doc.results:
+        return {}
+    slots: dict[str, SpecialistSlot] = {}
+    for name, payload in doc.results.items():
+        if name not in _SPECIALIST_SLOT_NAMES or not isinstance(payload, dict):
+            continue
+        try:
+            slots[name] = SpecialistSlot.model_validate(payload)
+        except PydanticValidationError:
+            _logger.warning(
+                "chat.cached_slot_dropped",
+                thread_id=doc.thread_id,
+                specialist=name,
+            )
+    return slots
+
+
+def _slots_to_results(final: ChatWorkflowState) -> dict[str, Any]:
+    """Serialise the turn's specialist slots for persistence."""
+    results: dict[str, Any] = {}
+    for name in _SPECIALIST_SLOT_NAMES:
+        slot = getattr(final, name, None)
+        if slot is not None:
+            results[name] = slot.model_dump(mode="json")
+    return results
+
+
+_SPECIALIST_SLOT_NAMES: tuple[str, ...] = (
+    "prs",
+    "genomic_variants",
+    "family_history",
+    "pgx",
+    "phenotype",
+)
 
 
 def _slot_to_view(slot: SpecialistSlot | None) -> ChatSpecialistSlotView | None:
@@ -642,27 +731,41 @@ async def _persist_turn_messages(
     thread_id: str,
     user_message: str,
     final: ChatWorkflowState,
+    doc: "SessionDocument | None" = None,
 ) -> None:
     """Slice 5 (B-009) — append the turn's user + assistant messages
     to the persisted thread so ``GET /threads/{id}`` returns the full
     transcript on refresh.
+
+    Also persists ``agents_completed`` and the specialist slots, which is
+    what makes the cross-turn cache real: the next turn rehydrates them
+    via :func:`_slots_from` and the chat router can skip a specialist
+    that has already answered.
 
     Best-effort — a persistence failure MUST NOT change the HTTP
     outcome the caller sees. Logs a warning and returns.
     """
     provider = container.thread_state_provider
     try:
-        doc = await provider.load(thread_id, ctx.clinician_id)
-        if doc is None:
+        current = doc if doc is not None else await provider.load(
+            thread_id, ctx.clinician_id
+        )
+        if current is None:
             return
         reply = _reply_from(final)
-        updated = doc.with_message(
+        updated = current.with_message(
             SessionMessage(role="user", content=user_message)
         )
         if reply:
             updated = updated.with_message(
                 SessionMessage(role="assistant", content=reply)
             )
+        updated = updated.model_copy(
+            update={
+                "agents_completed": list(final.agents_completed),
+                "results": _slots_to_results(final),
+            }
+        )
         await provider.save(updated)
     except Exception as exc:  # noqa: BLE001
         # Best-effort by design, but log the cause. A bare warning here
@@ -683,16 +786,19 @@ async def _persist_refusal_messages(
     thread_id: str,
     user_message: str,
     refusal_reply: str,
+    doc: "SessionDocument | None" = None,
 ) -> None:
     """Slice 5 (B-009) — persist the refusal turn too so the transcript
     is complete on refresh.
     """
     provider = container.thread_state_provider
     try:
-        doc = await provider.load(thread_id, ctx.clinician_id)
-        if doc is None:
+        current = doc if doc is not None else await provider.load(
+            thread_id, ctx.clinician_id
+        )
+        if current is None:
             return
-        updated = doc.with_message(
+        updated = current.with_message(
             SessionMessage(role="user", content=user_message)
         ).with_message(
             SessionMessage(role="assistant", content=refusal_reply)

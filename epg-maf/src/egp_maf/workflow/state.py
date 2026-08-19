@@ -23,6 +23,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from egp_maf.state.clinician_context import ClinicianContext
+from egp_maf.state.session_document import SessionMessage
+
+__all__ = [
+    "ChatWorkflowState",
+    "OrchestrationWorkflowState",
+    "Remove",
+    "SessionMessage",
+    "SpecialistSlot",
+    "apply_agents_completed",
+]
 
 # ── Specialist identifiers (5, per prototype) ────────────────────────
 _SPECIALIST_NAMES: frozenset[str] = frozenset(
@@ -66,21 +76,12 @@ class SpecialistSlot(BaseModel):
         return cls(status="failed", errors=[error])
 
 
-class SessionMessage(BaseModel):
-    """Conversation message — ports prototype ``BaseMessage`` shape to a
-    minimal role/content pair suitable for the workflow's shared state.
-
-    The chat router sees the raw list; the synthesizer strips provenance
-    from clinical context before assembling the LLM prompt.
-    """
-
-    role: Literal["user", "assistant", "system", "tool"]
-    content: str
-    timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-
-    model_config = ConfigDict(extra="forbid")
+# ``SessionMessage`` is imported from :mod:`egp_maf.state.session_document`
+# and re-exported here. It used to be re-declared in this module with an
+# identical shape minus ``message_id``. The API layer imported *this* copy
+# and handed it to ``SessionDocument.with_message``, which silently
+# accepted it (``model_copy`` skips validation) and dropped ``message_id``
+# on serialisation. One definition, one wire format.
 
 
 class ChatWorkflowState(BaseModel):
