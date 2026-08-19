@@ -721,8 +721,22 @@ async def _egp_error_handler(request: Request, exc: Exception) -> JSONResponse:
 async def _validation_error_handler(
     request: Request, exc: Exception
 ) -> JSONResponse:
-    """FastAPI request-body validation → HTTP 400 with a safe body."""
+    """Pydantic validation failure → HTTP 400 with a safe body.
+
+    NOTE: this handler catches *any* ``ValidationError``, not only ones
+    raised while parsing the request body — a model validated on the
+    response path (e.g. a Cosmos document) lands here too. Log the full
+    exception so a server-side schema mismatch is diagnosable instead of
+    silently masquerading as a bad client request.
+    """
     trace_id, _ = get_current_trace_and_span_ids()
+    _logger.exception(
+        "http.validation_error",
+        path=request.url.path,
+        method=request.method,
+        trace_id=trace_id,
+        exc_info=exc,
+    )
     return JSONResponse(
         status_code=400,
         content={

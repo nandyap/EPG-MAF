@@ -264,12 +264,38 @@ class ThreadStateProvider:
     # ── Serialisation helpers ───────────────────────────────────────
     @staticmethod
     def _document_from_item(item: dict[str, Any]) -> SessionDocument:
-        etag = item.pop("_etag", None)
-        # Strip Cosmos-internal keys that would fail ``extra='forbid'``.
-        for key in ("_rid", "_self", "_attachments", "_ts"):
-            item.pop(key, None)
+        """Map a raw Cosmos item onto :class:`SessionDocument`.
+
+        Cosmos decorates every stored document with system-managed keys
+        that are NOT part of our schema:
+
+        - ``id`` — the item key. We write it in :meth:`_item_from_document`
+          (Cosmos requires it) and it mirrors ``thread_id``.
+        - ``_etag`` — concurrency token, lifted onto the model's ``etag``.
+        - ``_rid`` / ``_self`` / ``_attachments`` / ``_ts`` — internal.
+
+        :class:`SessionDocument` is ``extra='forbid'``, so every one of
+        these must be removed before validation or the read raises
+        ``ValidationError``. We drop ``id`` plus any underscore-prefixed
+        key so future Cosmos system fields cannot break reads again.
+        """
+        # Copy — never mutate the caller's dict (query_items reuses pages).
+        payload = {k: v for k, v in item.items() if not k.startswith("_")}
+        etag = item.get("_etag")
+
+        # ``id`` is Cosmos' item key and duplicates ``thread_id``. Drop it,
+        # but assert the invariant first so a mismatch is loud, not silent.
+        item_id = payload.pop("id", None)
+        if item_id is not None and payload.get("thread_id") != item_id:
+            _logger.warning(
+                "session.item_id_thread_id_mismatch",
+                item_id=item_id,
+                thread_id=payload.get("thread_id"),
+            )
+            payload["thread_id"] = item_id
+
         # Cosmos serialises datetimes as ISO strings — Pydantic parses them.
-        doc = SessionDocument.model_validate(item)
+        doc = SessionDocument.model_validate(payload)
         return doc.model_copy(update={"etag": etag})
 
     def _item_from_document(self, doc: SessionDocument) -> dict[str, Any]:

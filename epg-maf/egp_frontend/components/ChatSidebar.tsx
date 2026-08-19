@@ -11,7 +11,7 @@ export function ChatSidebar({
   onNewChat: () => void;
   onDelete: (threadId: string) => Promise<void>;
 }) {
-  const { threads, loading, error } = useThreads();
+  const { threads, loading, error, refresh } = useThreads();
   const pathname = usePathname();
 
   return (
@@ -34,7 +34,19 @@ export function ChatSidebar({
         {loading && (
           <p className="p-2 text-sm text-slate-500">Loading…</p>
         )}
-        {error && <p className="p-2 text-sm text-red-700">{error}</p>}
+        {/* Rendered as a bordered card, visually distinct from the chat
+            list, so a load failure can never be mistaken for a thread. */}
+        {error && !loading && (
+          <div className="mx-1 mt-1 rounded-lg border border-red-200 bg-red-50 p-3">
+            <p className="text-sm font-medium text-red-800">{error}</p>
+            <button
+              onClick={() => void refresh()}
+              className="mt-2 rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-800 transition hover:bg-red-100"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         {!loading && !error && threads.length === 0 && (
           <p className="p-2 text-sm text-slate-500">No chats yet.</p>
         )}

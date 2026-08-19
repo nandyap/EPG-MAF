@@ -32,8 +32,13 @@ export function ThreadsProvider({ children }: { children: ReactNode }) {
     try {
       const resp = await api.listThreads();
       setThreads(resp.threads);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load chats");
+    } catch {
+      // Show a stable, user-facing message rather than the raw backend
+      // string. A server-side fault (e.g. a document that fails schema
+      // validation) otherwise surfaces here as something that reads like
+      // a user mistake — and, rendered in the list, like a chat entry.
+      setError("Couldn't load your chats.");
+      setThreads([]);
     } finally {
       setLoading(false);
     }

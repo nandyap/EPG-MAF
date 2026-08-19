@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
 import { api, HttpError } from "@/lib/api";
 import type { ChatResponse, ThreadDetail, ThreadMessage } from "@/lib/types";
+import { useThreads } from "@/lib/threads-context";
 import { ChatMessage } from "./ChatMessage";
 import { SpecialistCards } from "./SpecialistCards";
 import { ErrorBanner } from "./ErrorBanner";
@@ -12,6 +13,7 @@ type TranscriptItem =
   | { kind: "specialists"; response: ChatResponse; id: string };
 
 export function ChatWindow({ thread }: { thread: ThreadDetail }) {
+  const { refresh: refreshThreads } = useThreads();
   const [items, setItems] = useState<TranscriptItem[]>(() =>
     thread.messages.map((m, i) => ({
       kind: "message",
@@ -64,6 +66,10 @@ export function ChatWindow({ thread }: { thread: ThreadDetail }) {
         id: `cards-${Date.now()}`,
       };
       setItems((prev) => [...prev, assistant, cards]);
+      // The turn advanced the thread's ``last_activity`` (and, for an
+      // auto-titled thread, its title) server-side. Re-pull the sidebar
+      // so ordering and labels reflect the write we just made.
+      void refreshThreads();
     } catch (e) {
       let msg = e instanceof Error ? e.message : "Chat failed";
       if (e instanceof HttpError) {
