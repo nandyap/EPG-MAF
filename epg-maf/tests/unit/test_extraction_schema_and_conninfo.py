@@ -153,14 +153,32 @@ class TestConninfoQuoting:
         parsed = conninfo_to_dict(self._conninfo())
 
         assert "statement_timeout" not in parsed
-        assert parsed["options"] == "-c statement_timeout=30000"
+        assert "default_transaction_read_only" not in parsed
+        assert parsed["options"] == (
+            "-c statement_timeout=30000 -c default_transaction_read_only=on"
+        )
+
+    def test_read_only_is_set_at_connect_time(self) -> None:
+        """Setting this by executing ``SET SESSION CHARACTERISTICS`` from the
+        pool's ``configure`` callback left the connection INTRANS (psycopg is
+        not in autocommit mode), and psycopg_pool discards any connection
+        ``configure`` does not leave IDLE::
+
+            connection left in status INTRANS by configure function ...
+
+        Every connection was built and thrown away. Carrying it in the
+        conninfo needs no statement and cannot open a transaction.
+        """
+        parsed = conninfo_to_dict(self._conninfo())
+
+        assert "-c default_transaction_read_only=on" in str(parsed["options"])
 
     def test_statement_timeout_honours_settings(self) -> None:
         parsed = conninfo_to_dict(
             self._conninfo(POSTGRES_STATEMENT_TIMEOUT_SECONDS=5)
         )
 
-        assert parsed["options"] == "-c statement_timeout=5000"
+        assert "-c statement_timeout=5000" in str(parsed["options"])
 
     def test_core_parameters_present(self) -> None:
         parsed = conninfo_to_dict(self._conninfo())

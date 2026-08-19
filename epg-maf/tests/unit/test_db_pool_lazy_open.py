@@ -158,3 +158,54 @@ class TestManagedIdentityConnectionClass:
 
         assert "password=" not in conninfo
         assert "host=db.example.invalid" in conninfo
+
+
+class TestCredentialReuse:
+    def test_credential_is_constructed_once(self) -> None:
+        """A fresh ``DefaultAzureCredential`` per call defeats the SDK's
+        token cache — the deployed logs showed an IMDS round-trip for
+        every connection attempt."""
+        settings = Settings(
+            LLM_API_KEY="test-key",
+            POSTGRES_HOST="db.example.invalid",
+            POSTGRES_USE_MANAGED_IDENTITY=True,
+        )
+        factory = DbPoolFactory(settings)
+        constructed: list[int] = []
+
+        class _FakeToken:
+            token = "tok"
+
+        class _FakeCredential:
+            def __init__(self) -> None:
+                constructed.append(1)
+
+            def get_token(self, _scope: str) -> object:
+                return _FakeToken()
+
+        factory._credential = _FakeCredential()
+        constructed.clear()
+
+        assert factory._acquire_token() == "tok"
+        assert factory._acquire_token() == "tok"
+        assert constructed == []  # reused, never rebuilt
+
+
+class TestConfigureCallback:
+    @pytest.mark.asyncio
+    async def test_configure_leaves_connection_untouched(self) -> None:
+        """Anything executed here leaves the connection INTRANS and the
+        pool discards it. The hook must stay inert."""
+        factory = DbPoolFactory(_settings())
+
+        class _Conn:
+            def __init__(self) -> None:
+                self.executed: list[str] = []
+
+            async def execute(self, sql: str) -> None:
+                self.executed.append(sql)
+
+        conn = _Conn()
+        await factory._configure_connection(conn)
+
+        assert conn.executed == []

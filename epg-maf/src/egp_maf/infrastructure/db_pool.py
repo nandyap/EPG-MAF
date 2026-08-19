@@ -66,6 +66,7 @@ class DbPoolFactory:
 
         self._settings = settings
         self._token_provider = token_provider
+        self._credential: Any = None
         self._pool: "AsyncConnectionPool | None" = None
         self._last_open_attempt: float = 0.0
         self._last_open_error: str | None = None
@@ -100,7 +101,6 @@ class DbPoolFactory:
                 "max_size": self._settings.postgres_pool_max_size,
                 "timeout": self._settings.postgres_pool_timeout_seconds,
                 "open": False,
-                "configure": self._configure_connection,
             }
             if connection_class is not None:
                 kwargs["connection_class"] = connection_class
@@ -143,6 +143,11 @@ class DbPoolFactory:
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
+        if self._credential is not None:
+            close = getattr(self._credential, "close", None)
+            if callable(close):
+                close()
+            self._credential = None
 
     # ── Access ───────────────────────────────────────────────────────
     async def get_pool(self) -> "AsyncConnectionPool":
@@ -269,14 +274,39 @@ class DbPoolFactory:
         from psycopg.conninfo import make_conninfo  # type: ignore[import-untyped]
 
         s = self._settings
+        # Server-side settings applied at connect time via libpq's
+        # ``options``. ``default_transaction_read_only`` was previously set
+        # by executing ``SET SESSION CHARACTERISTICS AS TRANSACTION READ
+        # ONLY`` from the pool's ``configure`` callback — but psycopg is
+        # not in autocommit mode, so that statement opened an implicit
+        # transaction and left the connection INTRANS. psycopg_pool
+        # requires ``configure`` to return an IDLE connection
+        # (``pool_async.py`` checks ``transaction_status``) and discards it
+        # otherwise:
+        #
+        #     connection left in status INTRANS by configure function
+        #     <bound method DbPoolFactory._configure_connection ...>:
+        #     discarded
+        #
+        # Every connection was therefore built and thrown away, costing a
+        # token acquisition and a TLS handshake each time. Setting it here
+        # is equivalent (``SET SESSION CHARACTERISTICS`` just sets this
+        # GUC), needs no statement, and cannot leave a transaction open.
+        server_settings = [
+            f"-c statement_timeout={s.postgres_statement_timeout_seconds * 1000}",
+            # Belt-and-braces: the role is SELECT-only, but this makes a
+            # stray write fail at the database rather than relying on
+            # grants alone.
+            "-c default_transaction_read_only=on",
+        ]
+
         params: dict[str, Any] = {
             "host": s.postgres_host,
             "port": s.postgres_port,
             "dbname": s.postgres_database,
             "user": s.postgres_user,
             "sslmode": s.postgres_ssl_mode,
-            # statement_timeout is milliseconds server-side.
-            "options": f"-c statement_timeout={s.postgres_statement_timeout_seconds * 1000}",
+            "options": " ".join(server_settings),
             "application_name": "egp-maf",
         }
 
@@ -293,31 +323,40 @@ class DbPoolFactory:
         return make_conninfo(**params)
 
     def _acquire_token(self) -> str:
-        """Acquire an Entra ID token to use as the Postgres password."""
+        """Acquire an Entra ID token to use as the Postgres password.
+
+        The credential is cached on the factory. A fresh
+        ``DefaultAzureCredential`` per call defeats the SDK's internal
+        token cache, so every connection made a real HTTP round-trip to
+        the IMDS endpoint. Reusing one instance turns the steady-state
+        path into an in-memory read and only renews near expiry.
+        """
         if self._token_provider is not None:
             return self._token_provider()
 
-        # Production fallback — DefaultAzureCredential.
-        try:
-            from azure.identity import DefaultAzureCredential  # type: ignore[import-untyped]
-        except ImportError as exc:  # pragma: no cover
-            raise ConfigurationError(
-                "azure-identity is required when POSTGRES_USE_MANAGED_IDENTITY=true"
-            ) from exc
+        if self._credential is None:
+            try:
+                from azure.identity import (  # type: ignore[import-untyped]
+                    DefaultAzureCredential,
+                )
+            except ImportError as exc:  # pragma: no cover
+                raise ConfigurationError(
+                    "azure-identity is required when POSTGRES_USE_MANAGED_IDENTITY=true"
+                ) from exc
+            self._credential = DefaultAzureCredential()
 
-        credential = DefaultAzureCredential()
         try:
-            return credential.get_token(_POSTGRES_AAD_SCOPE).token
+            return str(self._credential.get_token(_POSTGRES_AAD_SCOPE).token)
         except Exception as exc:  # pragma: no cover — exercised in integration
             raise DatabaseUnavailable(
                 "Failed to acquire Entra ID token for Postgres"
             ) from exc
 
     async def _configure_connection(self, conn: object) -> None:
-        """Per-connection setup — read-only + statement timeout confirmation."""
-        # ``egp_agent_ro`` role is SELECT-only, but we also assert session read-only
-        # as belt-and-braces.
-        try:
-            await conn.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")  # type: ignore[attr-defined]
-        except Exception as exc:  # pragma: no cover
-            _logger.warning("db.pool.configure_failed", exc_info=exc)
+        """Deprecated — retained only so existing callers do not break.
+
+        Read-only enforcement moved into the conninfo ``options`` string.
+        Executing anything here would leave the connection INTRANS and the
+        pool would discard it; see :meth:`_build_conninfo`.
+        """
+        return None
