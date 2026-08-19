@@ -664,8 +664,16 @@ async def _persist_turn_messages(
                 SessionMessage(role="assistant", content=reply)
             )
         await provider.save(updated)
-    except Exception:  # noqa: BLE001
-        _logger.warning("chat.persist_messages_failed", thread_id=thread_id)
+    except Exception as exc:  # noqa: BLE001
+        # Best-effort by design, but log the cause. A bare warning here
+        # hides real persistence faults behind a silently-dropped
+        # transcript, which looks like a frontend bug.
+        _logger.warning(
+            "chat.persist_messages_failed",
+            thread_id=thread_id,
+            error=f"{type(exc).__name__}: {exc}",
+            exc_info=exc,
+        )
 
 
 async def _persist_refusal_messages(
@@ -690,8 +698,13 @@ async def _persist_refusal_messages(
             SessionMessage(role="assistant", content=refusal_reply)
         )
         await provider.save(updated)
-    except Exception:  # noqa: BLE001
-        _logger.warning("chat.persist_refusal_failed", thread_id=thread_id)
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "chat.persist_refusal_failed",
+            thread_id=thread_id,
+            error=f"{type(exc).__name__}: {exc}",
+            exc_info=exc,
+        )
 
 
 # ── Exception handlers ────────────────────────────────────────────

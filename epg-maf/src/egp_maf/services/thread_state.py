@@ -74,6 +74,7 @@ class ThreadStateProvider:
         On concurrency conflict, retries once with a fresh load. If the
         retry also conflicts, raises :class:`ConcurrencyConflict`.
         """
+        from azure.core import MatchConditions  # type: ignore[import-untyped]
         from azure.cosmos import exceptions as cosmos_exc  # type: ignore[import-untyped]
 
         container = await self._container_proxy()
@@ -93,11 +94,16 @@ class ThreadStateProvider:
                 if doc.etag is None:
                     response = await container.upsert_item(body=payload)
                 else:
+                    # ``match_condition`` must be the azure.core enum, not a
+                    # string — the SDK raises ``TypeError: Invalid match
+                    # condition`` for anything else, client-side, before any
+                    # request is issued. ``IfNotModified`` is the enum that
+                    # maps to the ``If-Match: <etag>`` header.
                     response = await container.replace_item(
                         item=stamped.thread_id,
                         body=payload,
                         etag=doc.etag,
-                        match_condition="IfMatch",
+                        match_condition=MatchConditions.IfNotModified,
                     )
                 new_etag = response.get("_etag")
                 return stamped.model_copy(update={"etag": new_etag})
