@@ -39,14 +39,50 @@ class TestPRSResult:
         r = PRSResult(prs_name="X", disease_name="Y", prs_score=0.5, risk_band="high")
         assert r.risk_band == "high"
 
-    def test_invalid_risk_band_rejected(self) -> None:
-        with pytest.raises(ValidationError):
-            PRSResult(
-                prs_name="X",
-                disease_name="Y",
-                prs_score=0.5,
-                risk_band="not-a-band",
-            )
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("very high", "very_high"),
+            ("Very High", "very_high"),
+            ("VERY_HIGH", "very_high"),
+            ("very-high", "very_high"),
+            ("  high  ", "high"),
+            ("very high risk", "very_high"),
+            ("low risk band", "low"),
+        ],
+    )
+    def test_risk_band_phrasings_are_normalised(
+        self, raw: str, expected: str
+    ) -> None:
+        """This model doubles as the structured-output schema, and the JSON
+        schema types ``risk_band`` as a free string — so the LLM writes
+        ``"very high"`` where the vocabulary says ``"very_high"``. Rejecting
+        those failed the whole PRS specialist with
+        ``LlmError: ... ValidationError``.
+        """
+        r = PRSResult(
+            prs_name="X", disease_name="Y", prs_score=0.5, risk_band=raw
+        )
+
+        assert r.risk_band == expected
+
+    def test_unrecognised_risk_band_degrades_to_none(self) -> None:
+        """The DB row is the source of truth, so dropping a bad derived
+        label is far cheaper than losing the answer."""
+        r = PRSResult(
+            prs_name="X",
+            disease_name="Y",
+            prs_score=0.5,
+            risk_band="not-a-band",
+        )
+
+        assert r.risk_band is None
+
+    def test_missing_prs_score_is_tolerated(self) -> None:
+        """An LLM omitting the score should cost the number, not the turn."""
+        r = PRSResult(prs_name="X", disease_name="Y")
+
+        assert r.prs_score is None
 
     def test_percentile_bounds(self) -> None:
         with pytest.raises(ValidationError):

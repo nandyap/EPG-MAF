@@ -57,11 +57,39 @@ _DEFAULT_ID_PATTERNS: tuple[str, ...] = (
 # patient rows. They must be paired with a plural noun ("patients") or
 # clearly-collective language ("cohort", "database", "carriers") to
 # avoid false-positives on single-patient phrasing.
+#
+# The first set covers "how many"-style phrasing. The second set was added
+# after live testing showed real cohort questions walking straight past
+# the guard and being answered by the LLM:
+#
+#   "tell me the total number of patients having a family history of
+#    diabetes"                       -> no "how many", so no match
+#   "list all the patients with a family history of breast cancer"
+#                                    -> no counting verb at all
+#
+# Both were answered rather than refused. The LLM only had one patient in
+# context so it did not leak data, but it discussed cohort scope instead
+# of declining, which is the wrong behaviour and reads badly in a clinical
+# setting. Phrase-matching on the *request shape* ("list … patients",
+# "which patients", "number of patients") catches these regardless of the
+# verb used.
 _COHORT_SCAN_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # ── Counting ────────────────────────────────────────────────────
     re.compile(r"\bhow many\s+patients?\b", re.I),
     re.compile(r"\bhow many\s+carriers?\b", re.I),
+    re.compile(r"\bhow many\s+(?:of\s+)?(?:the\s+)?(?:people|individuals|cases)\b", re.I),
+    re.compile(r"\b(?:total\s+)?number\s+of\s+patients?\b", re.I),
     re.compile(r"\bwhat\s+percentage\s+of\b.{0,40}?\bpatients?\b", re.I),
     re.compile(r"\bwhat\s+proportion\s+of\b.{0,40}?\b(?:cohort|patients?)\b", re.I),
+    # ── Enumerating ─────────────────────────────────────────────────
+    re.compile(r"\blist\s+(?:all\s+|the\s+|out\s+)*patients?\b", re.I),
+    re.compile(r"\bwhich\s+patients?\b", re.I),
+    re.compile(r"\bwho\s+else\b", re.I),
+    re.compile(r"\bevery\s+patient\b", re.I),
+    re.compile(r"\ball\s+(?:the\s+)?patients?\s+(?:with|who|having|that)\b", re.I),
+    re.compile(r"\bother\s+patients?\b", re.I),
+    re.compile(r"\bpatients?\s+in\s+(?:the\s+)?(?:database|cohort|system|dataset)\b", re.I),
+    # ── Comparing / ranking ─────────────────────────────────────────
     re.compile(r"\bmost\s+common\s+.+\s+in\s+(?:this\s+)?(?:database|cohort)\b", re.I),
     re.compile(r"\bcompare\b.{0,80}?\bto\s+other\s+patients?\b", re.I),
     re.compile(r"\bcompare\b.{0,80}?\bacross\s+(?:the\s+)?(?:cohort|patients?)\b", re.I),

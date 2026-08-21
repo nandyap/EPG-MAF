@@ -5,6 +5,8 @@ Prototype reference: ``agents/prs/state/schemas.py``.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from egp_maf.state.provenance import DBProvenance
@@ -46,6 +48,14 @@ class PRSResult(BaseModel):
     ``patient_prs.risk_band`` which the Repository populates. The specialist
     may override or re-derive it from ``percentile``. Both are legitimate —
     the DB value is the ground truth at read time.
+
+    **Validation is deliberately lenient on the LLM-facing fields.** This
+    model doubles as the structured-output schema for the extraction pass,
+    and one unparseable field there fails the whole specialist —
+    ``LlmError: LLM upstream error: ValidationError``, no PRS answer at
+    all. Every value here originates from the DB row, so rejecting the turn
+    buys no correctness; it only loses the interpretation. See
+    :meth:`_normalise_risk_band`.
     """
 
     # ── Identifiers ─────────────────────────────────────────────────
@@ -53,7 +63,10 @@ class PRSResult(BaseModel):
     disease_name: str
 
     # ── DB-sourced (patient_prs) ────────────────────────────────────
-    prs_score: float
+    # ``prs_score`` is optional purely so an LLM that omits it during
+    # extraction degrades to a missing number rather than a failed turn.
+    # The Repository always supplies it.
+    prs_score: float | None = None
     percentile: int | None = Field(default=None, ge=0, le=100)
     risk_band: str | None = None
 
@@ -70,13 +83,41 @@ class PRSResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("risk_band")
+    _RISK_BANDS: ClassVar[tuple[str, ...]] = (
+        "low",
+        "average",
+        "high",
+        "very_high",
+    )
+
+    @field_validator("risk_band", mode="before")
     @classmethod
-    def _validate_risk_band(cls, v: str | None) -> str | None:
-        allowed = {"low", "average", "high", "very_high"}
-        if v is not None and v not in allowed:
-            raise ValueError(f"risk_band must be one of {allowed}, got {v!r}")
-        return v
+    def _normalise_risk_band(cls, v: object) -> str | None:
+        """Coerce common phrasings onto the controlled vocabulary.
+
+        The JSON schema types this as a free string, so structured output
+        gives the model no constraint — it naturally writes ``"very high"``
+        or ``"Very High"`` where the vocabulary says ``"very_high"``. The
+        previous strict validator rejected those and took the entire PRS
+        result down with them.
+
+        Anything still unrecognised becomes ``None`` rather than an error:
+        the authoritative value is on the DB row, and losing a derived
+        label is far cheaper than losing the answer.
+        """
+        if v is None:
+            return None
+        collapsed = " ".join(
+            str(v).strip().lower().replace("-", " ").replace("_", " ").split()
+        )
+        canonical = collapsed.replace(" ", "_")
+        if canonical in cls._RISK_BANDS:
+            return canonical
+        # Tolerate qualifiers such as "very high risk" / "low risk band".
+        for band in cls._RISK_BANDS:
+            if collapsed.startswith(band.replace("_", " ")):
+                return band
+        return None
 
 
 class PRSResultList(BaseModel):
