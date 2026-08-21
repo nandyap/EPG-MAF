@@ -46,3 +46,8 @@ Thumbs.db
 logs/
 tmp/
 .cache/
+
+# ── Local working notes (never committed) ──────────────────────────
+# e.g. PROJECT-HANDOFF.local.md — a running engineering handoff used to
+# brief a fresh chat session. Reference material, not project artefacts.
+*.local.md
