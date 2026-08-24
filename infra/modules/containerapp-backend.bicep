@@ -39,6 +39,9 @@ param postgresUser string
 param cosmosEndpoint string
 param cosmosDatabase string
 
+@description('Per-document TTL for thread state, in seconds, or -1 to never expire. Refreshed on every save, so a finite value expires a thread that long after its LAST activity, not after creation. The container is provisioned with defaultTtl -1 (TTL enabled, per-item only), so this value is what actually expires threads. Set to -1 so the customer can review past conversations indefinitely — note that this makes Cosmos a growing store of clinical Q&A, which is a data-retention decision, not just a config value.')
+param cosmosSessionTtlSeconds int = -1
+
 @description('Key Vault URI, e.g. ``https://mykv.vault.azure.net/``. Retained for downstream code that reads other secrets from KV via UAMI; not used for the LLM key in this deploy.')
 param keyVaultUri string
 param llmEndpoint string
@@ -113,6 +116,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'COSMOS_DATABASE', value: cosmosDatabase }
             { name: 'COSMOS_CONTAINER', value: 'sessions' }
             { name: 'COSMOS_USE_MANAGED_IDENTITY', value: 'true' }
+            { name: 'COSMOS_SESSION_TTL_SECONDS', value: string(cosmosSessionTtlSeconds) }
             { name: 'KEY_VAULT_URI', value: keyVaultUri }
             { name: 'LLM_ENDPOINT', value: llmEndpoint }
             { name: 'LLM_API_KEY', secretRef: 'llm-api-key' }

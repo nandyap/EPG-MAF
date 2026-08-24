@@ -112,7 +112,7 @@ class Settings(BaseSettings):
     cosmos_use_managed_identity: bool = Field(default=False, alias="COSMOS_USE_MANAGED_IDENTITY")
     cosmos_key: SecretStr | None = Field(default=None, alias="COSMOS_KEY")
     cosmos_session_ttl_seconds: int = Field(
-        default=86400, alias="COSMOS_SESSION_TTL_SECONDS", ge=60, le=604800
+        default=86400, alias="COSMOS_SESSION_TTL_SECONDS"
     )
 
     # ── Prompts ─────────────────────────────────────────────────────
@@ -194,6 +194,26 @@ class Settings(BaseSettings):
     )
 
     # ── Cross-field validation ─────────────────────────────────────
+    @field_validator("cosmos_session_ttl_seconds")
+    @classmethod
+    def _validate_session_ttl(cls, value: int) -> int:
+        """Allow ``-1`` (never expire) or a positive 60s–7d window.
+
+        ``-1`` is Cosmos's own sentinel for "this item never expires",
+        not an out-of-range number — so it cannot be expressed as a
+        ``ge``/``le`` bound. Anything between 0 and 59 is rejected
+        because Cosmos would delete threads almost immediately, which
+        is far more likely to be a typo than an intent.
+        """
+        if value == -1:
+            return value
+        if 60 <= value <= 604800:
+            return value
+        raise ValueError(
+            "COSMOS_SESSION_TTL_SECONDS must be -1 (never expire) or "
+            f"between 60 and 604800 seconds; got {value}"
+        )
+
     @field_validator("postgres_password")
     @classmethod
     def _validate_postgres_credentials(
