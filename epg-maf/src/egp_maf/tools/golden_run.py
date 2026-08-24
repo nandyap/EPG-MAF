@@ -59,17 +59,22 @@ _DEFAULT_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', '8080')}"
 # (auth/authenticator.py::StubAuthenticator). ``oid`` and ``tid`` are the
 # only required claims — claims_to_context raises without them.
 #
-# The role is read from settings rather than hardcoded: ``has_role`` is an
-# exact, case-sensitive membership test against
-# ``settings.auth_required_role`` (default "Clinician"), so a literal
-# "clinician" here fails with 401 and no hint about the casing.
+# ``oid`` becomes ctx.clinician_id, which AllowlistAuthzPolicy.can_read
+# checks against the allowlist — and that policy fails CLOSED, so an
+# unrecognised id is denied every patient read. It must therefore match
+# the identity the deployed frontend uses ("demo"), not a name invented
+# for this runner. Override with GOLDEN_CLINICIAN_ID if the deployment
+# uses a different one.
+#
+# The role is read from settings because ``has_role`` is an exact,
+# case-sensitive membership test against ``auth_required_role``.
 def _stub_claims() -> dict[str, Any]:
     from egp_maf.config.settings import get_settings
 
     required_role = get_settings().auth_required_role
     return {
-        "oid": "golden-runner",
-        "tid": "golden-tenant",
+        "oid": os.environ.get("GOLDEN_CLINICIAN_ID", "demo"),
+        "tid": os.environ.get("GOLDEN_TENANT_ID", "demo-tenant"),
         "roles": [required_role] if required_role else [],
         "name": "Golden Set Runner",
     }
@@ -117,6 +122,28 @@ def _provenance_counts(body: dict[str, Any]) -> tuple[int, int]:
             if result.get("provenance"):
                 evidenced += 1
     return findings, evidenced
+
+
+def _slot_health(body: dict[str, Any]) -> list[str]:
+    """Report any specialist slot that did not complete cleanly.
+
+    Scoring a reply says nothing about whether the data behind it was
+    retrieved. A specialist whose tools failed can still return a
+    fluent, clinically-shaped answer composed from the model's own
+    knowledge, and every substring scorer will happily grade it. So the
+    slot's own status and errors are surfaced alongside the score.
+    """
+    problems: list[str] = []
+    for key in ("prs", "genomic_variants", "family_history", "pgx", "phenotype"):
+        slot = body.get(key)
+        if not isinstance(slot, dict):
+            continue
+        status = slot.get("status")
+        if status and status != "completed":
+            problems.append(f"{key}={status}")
+        for err in slot.get("errors") or []:
+            problems.append(f"{key}: {err}")
+    return problems
 
 
 def run_item(
@@ -182,8 +209,19 @@ def run_item(
         }
 
     passed = all(s.passed for s in scores.values()) if scores else True
+    slot_problems = _slot_health(body)
 
-    if passed:
+    # A finding with no provenance was not traced to a database row. When
+    # that is true of EVERY finding, the reply is not merely unevidenced
+    # — there is no evidence it came from the database at all, and a
+    # fluent answer composed from model knowledge looks identical to a
+    # correct one. Treat it as a failure regardless of substring scores,
+    # because scoring the prose is exactly what hides this.
+    unevidenced = findings > 0 and evidenced == 0
+
+    if unevidenced:
+        status = "FAIL"
+    elif passed:
         status = "PASS"
     elif item.expected_fail_reason:
         status = "XFAIL"
@@ -200,6 +238,8 @@ def run_item(
         "agents_completed": agents,
         "findings": findings,
         "findings_with_provenance": evidenced,
+        "unevidenced": unevidenced,
+        "slot_problems": slot_problems,
         "failed_scorers": {
             # ScorerResult is (passed, score, reason) — the explanation
             # field is ``reason``, not ``detail``.
@@ -222,6 +262,14 @@ def _print_row(r: dict[str, Any]) -> None:
     print(f"  {mark} {r['id']:<38} {r['domain']:<16} {r['duration_s']:>6}s{prov}")
     if r["status"] == "ERROR":
         print(f"        {r['error']}")
+    if r.get("unevidenced"):
+        print(
+            "        NO EVIDENCE: not one finding traced to a database row. "
+            "Treat this reply as unverified — a specialist whose tools "
+            "returned nothing can still produce a fluent answer."
+        )
+    for p in r.get("slot_problems") or []:
+        print(f"        slot: {p}")
     for name, detail in (r.get("failed_scorers") or {}).items():
         print(f"        {name}: {detail}")
     # Show the reply whenever a scorer rejected it. The scorers are exact
@@ -229,7 +277,7 @@ def _print_row(r: dict[str, Any]) -> None:
     # that it said the same thing in different words, or that this run
     # simply produced a shorter answer than a previous one. Those need
     # different responses and cannot be told apart from the summary line.
-    if r.get("failed_scorers") and r.get("reply"):
+    if (r.get("failed_scorers") or r.get("unevidenced")) and r.get("reply"):
         print("        --- reply ---")
         for line in str(r["reply"]).splitlines():
             print(f"        {line}")
@@ -332,7 +380,14 @@ def main(argv: list[str] | None = None) -> int:
                 f"Provenance: {total_evidenced}/{total_findings} findings carry "
                 f"at least one database record."
             )
-            if total_evidenced < total_findings:
+            if total_evidenced == 0:
+                print(
+                    "  NOT ONE finding was traced to a database row. Before "
+                    "reading anything into the scores, check that the runner's "
+                    "clinician id is on the authz allowlist — it fails closed, "
+                    "and a denied read still yields a fluent answer."
+                )
+            elif total_evidenced < total_findings:
                 print(
                     "  Findings without provenance render in the UI as "
                     '"No database record was linked to this finding".'
