@@ -1,0 +1,152 @@
+$ python -m egp_maf.tools.golden_run --domain pgx
+
+Running 8 item(s) against http://127.0.0.1:8080
+Each clinical turn takes ~35 s.
+
+  xfail golden.s11.pgx_all_normal              pgx                 5.1s  prov 0/4
+        fact_substring: missing fact substrings=['Normal Metabolizer', 'DPYD', 'TPMT'] (score 0.57)
+        --- reply ---
+        Patient HG04011 has four clinically relevant pharmacogenomic findings:
+
+        1. **Clopidogrel – CYP2C19**
+           - **Diplotype / Phenotype:** CYP2C19*1/*2 → **Intermediate Metabolizer**
+           - **Implication:** Reduced conversion of clopidogrel to its active metabolite → decreased antiplatelet effect.
+           - **Recommendation (CPIC-based):** Prefer **alternative antiplatelet therapy** (e.g., prasugrel or ticagrelor).
+
+        2. **Warfarin – CYP2C9**
+           - **Diplotype / Phenotype:** CYP2C9*1/*3 → **Intermediate Metabolizer**
+           - **Implication:** Slower warfarin clearance → increased bleeding risk at standard doses.
+           - **Recommendation (CPIC-based):** **Initiate at a lower warfarin dose** and titrate carefully according to INR.
+
+        3. **Codeine – CYP2D6**
+           - **Diplotype / Phenotype:** CYP2D6*1/*4 → **Intermediate Metabolizer**
+           - **Implication:** Reduced conversion of codeine to morphine → potentially reduced analgesic efficacy.
+           - **Recommendation (CPIC-based):** **Use with caution; monitor for reduced analgesia** and consider alternative analgesics if pain control is inadequate.
+
+        4. **Simvastatin – SLCO1B1**
+           - **Diplotype / Phenotype:** SLCO1B1*1/*5 → **Intermediate Function**
+           - **Implication:** Increased simvastatin exposure → higher risk of statin-induced myopathy, especially at higher doses.
+           - **Recommendation (CPIC-based):** **Consider a lower simvastatin dose or an alternative statin** to reduce myopathy risk.
+        --- end ---
+  xfail golden.s12.pgx_cyp2d6_rapid_metabolizer pgx                 5.6s  prov 0/4
+        fact_substring: missing fact substrings=['Rapid Metabolizer'] (score 0.67)
+        --- reply ---
+        For HG04012, the PGx panel identifies four clinically actionable drug–gene pairs:
+
+        1. **CYP2C19 – clopidogrel**
+           - Diplotype/phenotype: *1/*2, **Intermediate Metabolizer**.
+           - Implication: Reduced formation of active clopidogrel → decreased antiplatelet effect and higher cardiovascular risk.
+           - Actionable recommendation (CPIC-based): **Prefer an alternative antiplatelet** (e.g. prasugrel or ticagrelor) rather than clopidogrel.
+
+        2. **CYP2C9 – warfarin**
+           - Diplotype/phenotype: *1/*3, **Intermediate Metabolizer**.
+           - Implication: Slower warfarin clearance → increased bleeding risk at standard doses.
+           - Actionable recommendation: **Use a lower initial warfarin dose with close INR monitoring and careful titration**.
+
+        3. **SLCO1B1 – simvastatin**
+           - Diplotype/phenotype: *1/*5, **Intermediate Function**.
+           - Implication: Increased simvastatin exposure → higher risk of statin-induced myopathy, particularly at higher doses.
+           - Actionable recommendation: **Consider a lower simvastatin dose or switch to an alternative statin** (e.g. pravastatin or rosuvastatin) to reduce myopathy risk.
+
+        4. **CYP2D6 – codeine**
+           - Diplotype/phenotype: *1/*4, **Intermediate Metabolizer**.
+           - Implication: Reduced conversion of codeine to morphine → potentially reduced analgesic efficacy.
+           - Actionable recommendation: **Use codeine with caution; monitor for inadequate analgesia and consider alternative analgesics if pain control is suboptimal**.
+
+        In summary, there are **actionable PGx findings** for clopidogrel, warfarin, simvastatin, and codeine, with recommendations for alternative agents and/or dose and monitoring adjustments.
+        --- end ---
+  xfail golden.s13.pgx_cyp2c19_poor            pgx                 3.8s  prov 0/3
+        fact_substring: missing fact substrings=['Poor Metabolizer'] (score 0.67)
+        --- reply ---
+        Yes. This patient has three CPIC‑actionable pharmacogenomic findings that should influence prescribing:
+
+        1. **Clopidogrel – CYP2C19*1/*2 (Intermediate Metabolizer)**
+           - Effect: Reduced activation of clopidogrel → decreased antiplatelet efficacy.
+           - Recommendation: Consider alternative antiplatelet therapy (e.g., prasugrel or ticagrelor) rather than standard-dose clopidogrel.
+
+        2. **Codeine – CYP2D6*1/*4 (Intermediate Metabolizer)**
+           - Effect: Reduced conversion of codeine to morphine → risk of inadequate analgesia.
+           - Recommendation: Use with caution; monitor for lack of efficacy and consider alternative analgesics if needed.
+
+        3. **Simvastatin – SLCO1B1*1/*5 (Intermediate Function)**
+           - Effect: Increased simvastatin exposure → higher risk of statin-induced myopathy.
+           - Recommendation: Consider a lower starting dose or an alternative statin.
+        --- end ---
+  PASS  golden.s14.pgx_slco1b1_intermediate    pgx                 4.9s  prov 0/3
+  xfail golden.r10.extreme_pgx_profile         pgx                 4.6s  prov 0/3
+        fact_substring: missing fact substrings=['CYP2C9', 'TPMT', 'DPYD', 'Poor'] (score 0.50)
+        --- reply ---
+        For patient HG01121, three clinically actionable drug–gene interactions are reported:
+
+        1. **Clopidogrel – CYP2C19**
+           - **Genotype / diplotype:** CYP2C19*1/*2
+           - **Phenotype:** CYP2C19 Intermediate Metabolizer
+           - **Clinical impact:** Reduced conversion of clopidogrel to its active metabolite → decreased antiplatelet efficacy and higher risk of adverse cardiovascular events at standard dosing.
+           - **Recommendation (CPIC):** Consider alternative antiplatelet therapy not dependent on CYP2C19 activation, such as prasugrel or ticagrelor.
+
+        2. **Codeine – CYP2D6**
+           - **Genotype / diplotype:** CYP2D6*1/*4
+           - **Phenotype:** CYP2D6 Intermediate Metabolizer
+           - **Clinical impact:** Reduced conversion of codeine to morphine → potentially inadequate analgesia; toxicity is not the primary concern.
+           - **Recommendation (CPIC):** Use codeine with caution and monitor closely for lack of efficacy; if analgesia is insufficient, consider an alternative non–CYP2D6-dependent analgesic.
+
+        3. **Simvastatin – SLCO1B1**
+           - **Genotype / diplotype:** SLCO1B1*1/*5
+           - **Phenotype:** SLCO1B1 Intermediate Function
+           - **Clinical impact:** Reduced SLCO1B1 transporter function → increased simvastatin plasma levels and elevated risk of statin-associated myopathy.
+           - **Recommendation (CPIC):** Consider a lower simvastatin dose or use an alternative statin with lower SLCO1B1 dependence (e.g. pravastatin or rosuvastatin) to reduce myopathy risk.
+
+        No additional drug–gene interactions are reported for this patient beyond clopidogrel–CYP2C19, codeine–CYP2D6, and simvastatin–SLCO1B1.
+        --- end ---
+  xfail golden.r11.multiple_nonnormal_pgx      pgx                 5.3s  prov 0/4
+        fact_substring: missing fact substrings=['TPMT', 'azathioprine'] (score 0.67)
+        --- reply ---
+        Yes. This patient has several actionable PGx findings:
+
+        1. **Clopidogrel – CYP2C19*1/*2 (Intermediate Metabolizer, CPIC)**
+           - Reduced conversion to active metabolite → decreased antiplatelet effect.
+           - **Action:** *Avoid clopidogrel if possible*; **consider alternative P2Y12 inhibitor** such as **prasugrel or ticagrelor**, assuming no contraindications.
+
+        2. **Warfarin – CYP2C9*1/*3 (Intermediate Metabolizer, CPIC)**
+           - Slower clearance → higher bleeding risk at standard doses.
+           - **Action:** Use a **lower initial warfarin dose** than usual and **increase INR monitoring frequency** during initiation and titration.
+
+        3. **Codeine – CYP2D6*1/*4 (Intermediate Metabolizer, CPIC)**
+           - Reduced conversion to morphine → potential for inadequate analgesia.
+           - **Action:** If codeine is prescribed, **monitor closely for lack of efficacy**; consider **alternative non–CYP2D6–dependent analgesics** if pain control is suboptimal.
+
+        4. **Simvastatin – SLCO1B1*1/*5 (Intermediate Function, CPIC)**
+           - Increased simvastatin exposure → higher risk of statin-associated myopathy.
+           - **Action:** **Consider a lower simvastatin dose** or **switch to an alternative statin** with lower SLCO1B1 dependence (e.g. pravastatin or rosuvastatin), particularly if high-intensity therapy is needed or myopathy risk is a concern.
+
+        These recommendations should be integrated with indication, comorbidities, and concomitant medications when selecting and dosing these agents.
+        --- end ---
+  xfail golden.r12.mixed_pgx                   pgx                 3.4s  prov 0/3
+        fact_substring: missing fact substrings=['CYP2C9', 'TPMT', 'DPYD'] (score 0.50)
+        --- reply ---
+        For patient **NA19651**, the pharmacogenomic findings are:
+
+        1. **CYP2C19 – Clopidogrel**
+           - Diplotype: **\*1/\*2**
+           - Phenotype: **Intermediate Metabolizer**
+           - Clinical impact: Reduced conversion of clopidogrel to its active form → decreased antiplatelet effect and increased cardiovascular risk.
+           - Recommendation (CPIC-based): **Consider alternative antiplatelet therapy** such as prasugrel or ticagrelor.
+
+        2. **CYP2D6 – Codeine**
+           - Diplotype: **\*1/\*4**
+           - Phenotype: **Intermediate Metabolizer**
+           - Clinical impact: Reduced conversion of codeine to morphine → potentially reduced analgesic efficacy.
+           - Recommendation (CPIC-based): **Use codeine with caution; monitor for lack of efficacy** and consider alternative analgesics if pain control is inadequate.
+
+        3. **SLCO1B1 – Simvastatin**
+           - Diplotype: **\*1/\*5**
+           - Phenotype: **Intermediate Function**
+           - Clinical impact: Increased risk of **simvastatin-induced myopathy**.
+           - Recommendation (CPIC-based): **Consider a lower starting dose or an alternative statin** (e.g. pravastatin or rosuvastatin) to reduce myopathy risk.
+        --- end ---
+  PASS  pgx.001.drug_interaction               pgx                 3.2s  prov 0/2
+
+2 passed, 0 failed, 6 expected-fail, 0 errored.
+Provenance: 0/26 findings carry at least one database record.
+  Findings without provenance render in the UI as "No database record was linked to this finding".
+$
