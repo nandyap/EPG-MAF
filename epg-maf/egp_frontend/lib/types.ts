@@ -31,6 +31,16 @@ export type ThreadDetail = {
   created_at: string;
   last_activity: string;
   messages: ThreadMessage[];
+  // Specialist slots persisted with the thread. Present so that
+  // re-opening a thread restores its evidence panels — without these
+  // the transcript came back but every "Evidence" panel disappeared
+  // until the clinician asked a new question.
+  agents_completed?: string[];
+  prs?: SpecialistSlot;
+  genomic_variants?: SpecialistSlot;
+  family_history?: SpecialistSlot;
+  pgx?: SpecialistSlot;
+  phenotype?: SpecialistSlot;
 };
 
 export type ThreadCreateResponse = {

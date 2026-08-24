@@ -464,6 +464,16 @@ def create_app(container: Container) -> FastAPI:
                 )
                 for m in doc.messages
             ],
+            agents_completed=list(doc.agents_completed),
+            prs=_persisted_slot_to_view(doc.results.get("prs")),
+            genomic_variants=_persisted_slot_to_view(
+                doc.results.get("genomic_variants")
+            ),
+            family_history=_persisted_slot_to_view(
+                doc.results.get("family_history")
+            ),
+            pgx=_persisted_slot_to_view(doc.results.get("pgx")),
+            phenotype=_persisted_slot_to_view(doc.results.get("phenotype")),
         )
 
     # ── Error handlers ─────────────────────────────────────────────
@@ -663,6 +673,28 @@ def _slot_to_view(slot: SpecialistSlot | None) -> ChatSpecialistSlotView | None:
         status=slot.status,
         output=slot.output,
         errors=list(slot.errors),
+    )
+
+
+def _persisted_slot_to_view(raw: Any) -> ChatSpecialistSlotView | None:
+    """Build a slot view from a Cosmos-persisted ``results`` entry.
+
+    ``SessionDocument.results`` is ``dict[str, Any]`` — the slots come
+    back as plain dicts, not :class:`SpecialistSlot` objects, so
+    :func:`_slot_to_view` cannot be reused here.
+
+    Tolerant by design: this powers thread *resume*, and a document
+    written by an older schema version should still render its
+    transcript rather than fail the whole request.
+    """
+    if not isinstance(raw, dict):
+        return None
+    output = raw.get("output")
+    errors = raw.get("errors")
+    return ChatSpecialistSlotView(
+        status=str(raw.get("status") or "completed"),
+        output=output if isinstance(output, dict) else None,
+        errors=[str(e) for e in errors] if isinstance(errors, list) else [],
     )
 
 

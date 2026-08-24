@@ -14,13 +14,39 @@ type TranscriptItem =
 
 export function ChatWindow({ thread }: { thread: ThreadDetail }) {
   const { refresh: refreshThreads } = useThreads();
-  const [items, setItems] = useState<TranscriptItem[]>(() =>
-    thread.messages.map((m, i) => ({
+  const [items, setItems] = useState<TranscriptItem[]>(() => {
+    const history: TranscriptItem[] = thread.messages.map((m, i) => ({
       kind: "message",
       msg: m,
       id: `hist-${i}`,
-    })),
-  );
+    }));
+    // Restore the specialist cards (and with them the evidence panels)
+    // for a thread being re-opened. The slots are persisted per thread,
+    // not per message, so they belong after the whole transcript rather
+    // than interleaved with it.
+    const restored: ChatResponse = {
+      thread_id: thread.thread_id,
+      patient_id: thread.patient_id,
+      trace_id: null,
+      reply: "",
+      agents_completed: thread.agents_completed ?? [],
+      prs: thread.prs ?? null,
+      genomic_variants: thread.genomic_variants ?? null,
+      family_history: thread.family_history ?? null,
+      pgx: thread.pgx ?? null,
+      phenotype: thread.phenotype ?? null,
+    };
+    const hasSlots = [
+      restored.prs,
+      restored.genomic_variants,
+      restored.family_history,
+      restored.pgx,
+      restored.phenotype,
+    ].some((s) => s !== null);
+    return hasSlots
+      ? [...history, { kind: "specialists", response: restored, id: "hist-cards" }]
+      : history;
+  });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

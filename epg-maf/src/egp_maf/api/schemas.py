@@ -165,7 +165,16 @@ class ThreadMessageView(BaseModel):
 
 class ThreadDetailResponse(BaseModel):
     """Response of ``GET /threads/{thread_id}`` — full transcript for
-    resuming a chat after refresh (B-009)."""
+    resuming a chat after refresh (B-009).
+
+    Carries the specialist slots as well as the transcript. They were
+    omitted originally because this endpoint only had to restore the
+    conversation, but the evidence panel reads provenance out of the
+    slots — so without them, switching threads in the sidebar silently
+    dropped every "Evidence" panel until the clinician asked a new
+    question. The data was in Cosmos the whole time (``doc.results``);
+    it just was not being serialised.
+    """
 
     thread_id: str
     patient_id: str
@@ -173,5 +182,11 @@ class ThreadDetailResponse(BaseModel):
     created_at: datetime
     last_activity: datetime
     messages: list[ThreadMessageView] = Field(default_factory=list)
+    agents_completed: list[str] = Field(default_factory=list)
+    prs: ChatSpecialistSlotView | None = None
+    genomic_variants: ChatSpecialistSlotView | None = None
+    family_history: ChatSpecialistSlotView | None = None
+    pgx: ChatSpecialistSlotView | None = None
+    phenotype: ChatSpecialistSlotView | None = None
 
     model_config = ConfigDict(extra="forbid")
