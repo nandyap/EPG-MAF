@@ -131,9 +131,27 @@ function cellValue(value: unknown): string {
   return String(value);
 }
 
+// Keys that are not database columns and must not appear under
+// "Database row as retrieved".
+//
+// On the ReAct path, _attach_provenance sets source_row from the tool's
+// output row — which for a get_* tool is an already-serialised result
+// object, so it carries the model's own interpretation and a nested copy
+// of the provenance record we are currently rendering. Showing those
+// back would both duplicate the panel and, worse, present LLM-derived
+// text as if it were retrieved data.
+const NON_COLUMN_KEYS = new Set([
+  "provenance",
+  "interpretation",
+  "interpretation_model",
+  "summary_model",
+]);
+
 function ProvenanceRecord({ p }: { p: Provenance }) {
   const params = Object.entries(p.tool_parameters ?? {});
-  const row = Object.entries(p.source_row ?? {});
+  const row = Object.entries(p.source_row ?? {}).filter(
+    ([k]) => !NON_COLUMN_KEYS.has(k),
+  );
 
   return (
     <div className="rounded-md border border-slate-200 bg-white p-3">
