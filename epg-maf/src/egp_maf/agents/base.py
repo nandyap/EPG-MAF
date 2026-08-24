@@ -434,3 +434,36 @@ def attach_provenance_to_results(
                 result.provenance.append(provenance)
                 seen_tools.add(call.tool_name)
                 break
+
+    # A result with no provenance is a clinical statement with nothing
+    # recorded behind it. It renders to the clinician as "No database
+    # record was linked to this finding", and it looks identical whether
+    # the cause is benign (the row genuinely had no match) or serious
+    # (the agent never called the provenance-bearing tool, or the tools
+    # failed and the answer came from the model's own knowledge).
+    #
+    # Nothing here can tell those apart, so this only reports. But it
+    # reports loudly enough to be caught in telemetry rather than in
+    # front of a customer, which is how it was found the first time.
+    unevidenced = [r for r in results if not r.provenance]
+    if unevidenced:
+        eligible_calls = [
+            c.tool_name for c in tool_calls if c.tool_name in tool_source_table
+        ]
+        _logger.warning(
+            "provenance.results_unevidenced",
+            extra={
+                "unevidenced_count": len(unevidenced),
+                "result_count": len(results),
+                "eligible_tool_calls": eligible_calls,
+                "all_tool_calls": [c.tool_name for c in tool_calls],
+                # No eligible call at all means the agent answered without
+                # ever touching the tool that carries evidence — a
+                # different failure from a matcher that found no row.
+                "reason": (
+                    "no provenance-eligible tool was called"
+                    if not eligible_calls
+                    else "eligible tool ran but no row matched the result"
+                ),
+            },
+        )
