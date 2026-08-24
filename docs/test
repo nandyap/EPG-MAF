@@ -150,3 +150,31 @@ Each clinical turn takes ~35 s.
 Provenance: 0/26 findings carry at least one database record.
   Findings without provenance render in the UI as "No database record was linked to this finding".
 $
+
+
+
+"patient_id","gene","diplotype","phenotype"
+"HG01121","CYP2C19","*2/*2","Poor Metabolizer"
+"HG01121","CYP2C9","*1/*2","Intermediate Metabolizer"
+"HG01121","CYP2D6","*4/*4","Poor Metabolizer"
+"HG01121","DPYD","*1/*2A","Intermediate Metabolizer"
+"HG01121","SLCO1B1","*1/*5","Intermediate Metabolizer"
+"HG01121","TPMT","*3A/*3A","Poor Metabolizer"
+"HG04011","CYP2C19","*1/*1","Normal Metabolizer"
+"HG04011","CYP2C9","*1/*1","Normal Metabolizer"
+"HG04011","CYP2D6","*1/*1","Normal Metabolizer"
+"HG04011","DPYD","*1/*1","Normal Metabolizer"
+"HG04011","SLCO1B1","*1/*1","Normal Metabolizer"
+"HG04011","TPMT","*1/*1","Normal Metabolizer"
+"HG04012","CYP2C19","*1/*1","Normal Metabolizer"
+"HG04012","CYP2C9","*1/*1","Normal Metabolizer"
+"HG04012","CYP2D6","*1/*2xN","Rapid Metabolizer"
+"HG04012","DPYD","*1/*1","Normal Metabolizer"
+"HG04012","SLCO1B1","*1/*1","Normal Metabolizer"
+"HG04012","TPMT","*1/*1","Normal Metabolizer"
+"HG04013","CYP2C19","*2/*2","Poor Metabolizer"
+"HG04013","CYP2C9","*1/*1","Normal Metabolizer"
+"HG04013","CYP2D6","*1/*1","Normal Metabolizer"
+"HG04013","DPYD","*1/*1","Normal Metabolizer"
+"HG04013","SLCO1B1","*1/*1","Normal Metabolizer"
+"HG04013","TPMT","*1/*1","Normal Metabolizer"
