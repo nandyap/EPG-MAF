@@ -58,16 +58,25 @@ _DEFAULT_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', '8080')}"
 # The stub authenticator treats the bearer token as a JSON claim dict
 # (auth/authenticator.py::StubAuthenticator). ``oid`` and ``tid`` are the
 # only required claims — claims_to_context raises without them.
-_STUB_CLAIMS = {
-    "oid": "golden-runner",
-    "tid": "golden-tenant",
-    "roles": ["clinician"],
-    "name": "Golden Set Runner",
-}
+#
+# The role is read from settings rather than hardcoded: ``has_role`` is an
+# exact, case-sensitive membership test against
+# ``settings.auth_required_role`` (default "Clinician"), so a literal
+# "clinician" here fails with 401 and no hint about the casing.
+def _stub_claims() -> dict[str, Any]:
+    from egp_maf.config.settings import get_settings
+
+    required_role = get_settings().auth_required_role
+    return {
+        "oid": "golden-runner",
+        "tid": "golden-tenant",
+        "roles": [required_role] if required_role else [],
+        "name": "Golden Set Runner",
+    }
 
 
 def _token() -> str:
-    return os.environ.get("GOLDEN_BEARER_TOKEN") or json.dumps(_STUB_CLAIMS)
+    return os.environ.get("GOLDEN_BEARER_TOKEN") or json.dumps(_stub_claims())
 
 
 def _score(item: GoldenItem, reply: str, agents: list[str]) -> dict[str, ScorerResult]:
@@ -261,6 +270,20 @@ def main(argv: list[str] | None = None) -> int:
             results.append(r)
             if not args.json:
                 _print_row(r)
+            # 401/403 is a configuration problem, not an item problem — it
+            # will recur identically for every remaining item, so stop
+            # rather than printing the same line 54 more times.
+            if r["status"] == "ERROR" and r.get("error", "").startswith(
+                ("HTTP 401", "HTTP 403")
+            ):
+                print(
+                    "\nAborting: the API rejected the runner's credentials. "
+                    "The stub token's role must match EGP_AUTH_REQUIRED_ROLE "
+                    "exactly (case-sensitive), or set GOLDEN_BEARER_TOKEN to "
+                    "a real bearer token.",
+                    file=sys.stderr,
+                )
+                break
 
     counts = {s: sum(1 for r in results if r["status"] == s) for s in
               ("PASS", "FAIL", "XFAIL", "ERROR")}
