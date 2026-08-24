@@ -45,7 +45,15 @@ from egp_maf.evals.scorers import (
     ScorerResult,
 )
 
-_DEFAULT_BASE_URL = "http://localhost:8000"
+# The image serves uvicorn on ``${PORT:-8080}`` (Dockerfile CMD), and the
+# Container App sets targetPort 8080 — not 8000.
+#
+# Use the literal 127.0.0.1 rather than "localhost": httpx resolves
+# localhost to ::1 first, and the container has no usable IPv6 loopback,
+# which surfaces as ``[Errno 99] Cannot assign requested address`` at
+# connect time — distinct from the ECONNREFUSED a wrong port would give.
+_DEFAULT_BASE_URL = f"http://127.0.0.1:{os.environ.get('PORT', '8080')}"
+
 
 # The stub authenticator treats the bearer token as a JSON claim dict
 # (auth/authenticator.py::StubAuthenticator). ``oid`` and ``tid`` are the
@@ -233,6 +241,21 @@ def main(argv: list[str] | None = None) -> int:
 
     results: list[dict[str, Any]] = []
     with httpx.Client(base_url=args.base_url) as client:
+        # Probe once before spending ~35 s per item discovering the same
+        # connection failure 55 times over.
+        try:
+            client.get("/healthz", timeout=10.0).raise_for_status()
+        except httpx.HTTPError as exc:
+            print(
+                f"Cannot reach the API at {args.base_url}: "
+                f"{exc.__class__.__name__}: {exc}\n"
+                "This runner is meant to be executed INSIDE the backend "
+                "container (ingress is internal-only). Check the port with "
+                "`env | grep PORT`, or pass --base-url.",
+                file=sys.stderr,
+            )
+            return 2
+
         for item in items:
             r = run_item(client, item, timeout=args.timeout)
             results.append(r)
