@@ -163,9 +163,25 @@ def run_item(
     body = resp.json()
     reply = body.get("reply") or ""
     agents = body.get("agents_completed") or []
-    scores = _score(item, reply, agents)
+
+    # A full run is ~30 minutes of real clinical turns. An unexpected
+    # error while scoring one item must not discard everything already
+    # collected, so scoring failures are recorded as that item's result
+    # rather than propagating.
+    try:
+        scores = _score(item, reply, agents)
+        findings, evidenced = _provenance_counts(body)
+    except Exception as exc:  # noqa: BLE001 — deliberately broad, see above
+        return {
+            "id": item.id,
+            "domain": item.domain,
+            "status": "ERROR",
+            "error": f"scoring failed: {exc.__class__.__name__}: {exc}",
+            "duration_s": duration,
+            "reply": reply,
+        }
+
     passed = all(s.passed for s in scores.values()) if scores else True
-    findings, evidenced = _provenance_counts(body)
 
     if passed:
         status = "PASS"
@@ -185,7 +201,11 @@ def run_item(
         "findings": findings,
         "findings_with_provenance": evidenced,
         "failed_scorers": {
-            name: s.detail for name, s in scores.items() if not s.passed
+            # ScorerResult is (passed, score, reason) — the explanation
+            # field is ``reason``, not ``detail``.
+            name: f"{s.reason} (score {s.score:.2f})"
+            for name, s in scores.items()
+            if not s.passed
         },
         "expected_fail_reason": item.expected_fail_reason,
         "reply": reply,
