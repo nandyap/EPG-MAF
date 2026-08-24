@@ -224,6 +224,16 @@ def _print_row(r: dict[str, Any]) -> None:
         print(f"        {r['error']}")
     for name, detail in (r.get("failed_scorers") or {}).items():
         print(f"        {name}: {detail}")
+    # Show the reply whenever a scorer rejected it. The scorers are exact
+    # substring tests, so "missing X" can mean the answer was wrong, or
+    # that it said the same thing in different words, or that this run
+    # simply produced a shorter answer than a previous one. Those need
+    # different responses and cannot be told apart from the summary line.
+    if r.get("failed_scorers") and r.get("reply"):
+        print("        --- reply ---")
+        for line in str(r["reply"]).splitlines():
+            print(f"        {line}")
+        print("        --- end ---")
 
 
 def main(argv: list[str] | None = None) -> int:
