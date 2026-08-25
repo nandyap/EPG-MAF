@@ -95,11 +95,11 @@ class PhenotypeRepository(BaseRepository):
 
         if disease_name is not None and search_term is not None:
             conditions.append(
-                "(disease_name = %s OR term ILIKE %s OR description ILIKE %s)"
+                "(disease_name ILIKE %s OR term ILIKE %s OR description ILIKE %s)"
             )
             params += [disease_name, f"%{search_term}%", f"%{search_term}%"]
         elif disease_name is not None:
-            conditions.append("disease_name = %s")
+            conditions.append("disease_name ILIKE %s")
             params.append(disease_name)
         elif search_term is not None:
             conditions.append(

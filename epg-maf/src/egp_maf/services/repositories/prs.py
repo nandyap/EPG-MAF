@@ -88,7 +88,7 @@ class PRSRepository(BaseRepository):
         conditions: list[str] = []
         params: list[Any] = []
         if prs_name is not None:
-            conditions.append("prs_name = %s")
+            conditions.append("prs_name ILIKE %s")
             params.append(prs_name)
         if disease_name is not None:
             conditions.append("disease_name ILIKE %s")

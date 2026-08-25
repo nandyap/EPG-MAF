@@ -106,7 +106,7 @@ class FamilyHistoryRepository(BaseRepository):
         conditions: list[str] = []
         params: list[Any] = []
         if criteria_name is not None:
-            conditions.append("criteria_name = %s")
+            conditions.append("criteria_name ILIKE %s")
             params.append(criteria_name)
         if disease_name is not None:
             conditions.append("disease_name ILIKE %s")
@@ -132,11 +132,14 @@ class FamilyHistoryRepository(BaseRepository):
 
         conditions: list[str] = ["pkh.patient_id = %s"]
         params: list[Any] = [patient_id]
+        # Case-insensitive exact match: the LLM re-types these values, and
+        # "Hereditary Breast Cancer" vs "hereditary breast cancer" would
+        # otherwise return nothing at all.
         if disease_name is not None:
-            conditions.append("pkh.disease_name = %s")
+            conditions.append("pkh.disease_name ILIKE %s")
             params.append(disease_name)
         if criteria_name is not None:
-            conditions.append("pkh.criteria_name = %s")
+            conditions.append("pkh.criteria_name ILIKE %s")
             params.append(criteria_name)
         where = "WHERE " + " AND ".join(conditions)
 

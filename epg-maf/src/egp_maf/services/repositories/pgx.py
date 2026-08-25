@@ -80,11 +80,16 @@ class PGXRepository(BaseRepository):
     ) -> list[PGXAnnotation]:
         conditions: list[str] = []
         params: list[Any] = []
+        # ILIKE without wildcards is an exact comparison, just
+        # case-insensitive. The filter values are re-typed by the LLM
+        # rather than passed through verbatim, so ``=`` silently returns
+        # zero rows on a casing difference — indistinguishable from the
+        # patient genuinely having no such record.
         if gene is not None:
-            conditions.append("gene = %s")
+            conditions.append("gene ILIKE %s")
             params.append(gene)
         if phenotype is not None:
-            conditions.append("phenotype = %s")
+            conditions.append("phenotype ILIKE %s")
             params.append(phenotype)
         if drug is not None:
             conditions.append("drug ILIKE %s")
@@ -105,7 +110,7 @@ class PGXRepository(BaseRepository):
         conditions: list[str] = ["pps.patient_id = %s"]
         params: list[Any] = [patient_id]
         if gene is not None:
-            conditions.append("pps.gene = %s")
+            conditions.append("pps.gene ILIKE %s")
             params.append(gene)
         where = "WHERE " + " AND ".join(conditions)
 
