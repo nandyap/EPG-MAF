@@ -35,6 +35,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
 from agent_framework import FunctionTool
@@ -467,3 +468,95 @@ def attach_provenance_to_results(
                 ),
             },
         )
+
+
+def normalise_key_part(value: Any) -> str:
+    """Case- and whitespace-insensitive form of one key component.
+
+    The ReAct matchers compare the LLM's transcription of a value against
+    the database row with ``==``. That is exact, so ``"Pathogenic"`` vs
+    ``"pathogenic"`` or a stray trailing space silently produces no match
+    and therefore no evidence. Backfill matching normalises first.
+    """
+    if value is None:
+        return ""
+    return " ".join(str(value).split()).casefold()
+
+
+async def backfill_provenance_from_repository(
+    *,
+    domain: str,
+    patient_id: str,
+    results: Sequence[Any],
+    fetch_rows: Callable[[], Awaitable[Sequence[Any]]],
+    key_of: Callable[[Any], tuple[str, ...]],
+) -> None:
+    """Evidence any result the ReAct pass left without provenance.
+
+    ``attach_provenance_to_results`` can only cite tools the agent chose
+    to call, matched exactly as the LLM transcribed them. Two distinct
+    failures follow from that, and both were live:
+
+    - **The provenance-bearing tool never ran.** PGx and genomic variants
+      can answer from ``explore``/``search`` alone, so the agent had no
+      reason to call ``get_*`` and did not.
+    - **It ran, but nothing matched.** Family history calls ``get`` every
+      time, yet exact equality on ``(disease_name, criteria_name)`` fails
+      on any difference of case or spacing between the model's wording
+      and the row.
+
+    Instructing the model to behave differently does not fix either one;
+    it makes correctness contingent on the model complying on every turn.
+    So this asks the repository directly — plain SQL, no model in the
+    loop, and the rows arrive with provenance already built at query time
+    (ADR-005).
+
+    Runs only when something is unevidenced, so the healthy path is
+    untouched. Matching is normalised but still requires every key
+    component to correspond: a finding the model invented matches no row
+    and stays unevidenced, which is correct. **Attaching the wrong row
+    would be worse than attaching none, because it would look right.**
+
+    Fail-soft. By this point the answer exists and only its evidence is
+    missing, so a database failure must not turn a successful turn into a
+    failed one — findings stay unevidenced and the UI says so plainly.
+    """
+    unevidenced = [r for r in results if not r.provenance]
+    if not unevidenced:
+        return
+
+    try:
+        rows = await fetch_rows()
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        _logger.warning(
+            "provenance.backfill_failed",
+            extra={
+                "domain": domain,
+                "patient_id": patient_id,
+                "unevidenced_count": len(unevidenced),
+                "error": f"{exc.__class__.__name__}: {exc}",
+            },
+        )
+        return
+
+    by_key: dict[tuple[str, ...], Any] = {}
+    for row in rows:
+        if getattr(row, "provenance", None):
+            by_key.setdefault(key_of(row), row)
+
+    for result in unevidenced:
+        match = by_key.get(key_of(result))
+        if match is not None:
+            result.provenance.extend(match.provenance)
+
+    still_unevidenced = sum(1 for r in results if not r.provenance)
+    _logger.info(
+        "provenance.backfilled",
+        extra={
+            "domain": domain,
+            "patient_id": patient_id,
+            "unevidenced_before": len(unevidenced),
+            "unevidenced_after": still_unevidenced,
+            "rows_available": len(by_key),
+        },
+    )

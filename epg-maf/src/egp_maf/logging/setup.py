@@ -50,6 +50,29 @@ def configure_logging(settings: Settings) -> structlog.stdlib.BoundLogger:
         force=True,  # override previous configuration
     )
 
+    # 1b. Quieten third-party loggers that are verbose at INFO.
+    #
+    # The Azure SDK's http_logging_policy logs the full request URL plus
+    # every response header at INFO, so a single Cosmos write produced
+    # ~25 lines. At one Cosmos read and one write per turn that buried
+    # our own logs and made reading a trace of a single chat turn a
+    # manual filtering exercise.
+    #
+    # WARNING keeps genuine SDK problems (throttling, retries, auth
+    # failures) visible while dropping the per-request narration. The
+    # credential chain is separated out because "DefaultAzureCredential
+    # acquired a token from ManagedIdentityCredential" on every call is
+    # reassuring exactly once.
+    for noisy in (
+        "azure.core.pipeline.policies.http_logging_policy",
+        "azure.identity",
+        "azure.identity.aio",
+        "azure.cosmos",
+        "urllib3.connectionpool",
+        "httpx",
+    ):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     # 2. Structlog processor pipeline.
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,

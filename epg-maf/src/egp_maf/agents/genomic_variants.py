@@ -23,6 +23,8 @@ from egp_maf.agents.base import (
     SpecialistBase,
     ToolCall,
     attach_provenance_to_results,
+    backfill_provenance_from_repository,
+    normalise_key_part,
 )
 from egp_maf.agents.state_outputs import GenomicVariantsStateOutput
 from egp_maf.agents.tool_shims import build_genomic_variants_tools
@@ -125,6 +127,20 @@ class GenomicVariantsSpecialist(SpecialistBase[GenomicVariantsResultList]):
             tool_fields_derived=_TOOL_FIELDS_DERIVED,
             row_matches_result=_row_matches_result,
             provenance_builder=self._provenance_service.build,
+        )
+
+        # The agent can answer from explore + search alone (both return
+        # the variant id and its annotations), so get_patient_genomic_
+        # variants — the only provenance-bearing tool — is frequently
+        # never called. Observed live 2026-08-25.
+        await backfill_provenance_from_repository(
+            domain="genomic_variants",
+            patient_id=patient_id,
+            results=result_list.results,
+            fetch_rows=lambda: self._repo.get_patient_genomic_variants(
+                ctx, patient_id
+            ),
+            key_of=lambda r: (normalise_key_part(r.variant_id),),
         )
         return result_list
 

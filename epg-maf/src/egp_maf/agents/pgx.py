@@ -25,6 +25,8 @@ from egp_maf.agents.base import (
     SpecialistBase,
     ToolCall,
     attach_provenance_to_results,
+    backfill_provenance_from_repository,
+    normalise_key_part,
 )
 from egp_maf.agents.state_outputs import PGXStateOutput
 from egp_maf.agents.tool_shims import build_pgx_tools
@@ -121,91 +123,20 @@ class PGXSpecialist(SpecialistBase[PGXResultList]):
             provenance_builder=self._provenance_service.build,
         )
 
-        await self._backfill_provenance(result_list, ctx, patient_id)
-        return result_list
-
-    async def _backfill_provenance(
-        self,
-        result_list: PGXResultList,
-        ctx: ClinicianContext,
-        patient_id: str,
-    ) -> None:
-        """Evidence any result the ReAct pass left unevidenced.
-
-        ``attach_provenance_to_results`` can only cite tools the agent
-        actually called, and only ``get_patient_pgx`` carries provenance.
-        PGx is the domain where that breaks down: ``explore_patient_pgx``
-        already returns gene, diplotype and phenotype, which for a patient
-        with normal function is the whole answer — so the agent has no
-        reason to call ``get`` and frequently does not.
-
-        Instructing it to in the prompt is not a fix. It makes correctness
-        depend on the model complying on every turn, and when it does not
-        the failure is silent: six true, database-sourced findings render
-        as "No database record was linked to this finding".
-
-        So this asks the repository directly. It is a plain SQL read with
-        no model in the loop — the same query the tool would have run, and
-        the rows come back with provenance already attached at query time
-        (ADR-005). Runs only when something is unevidenced, so the normal
-        path costs nothing.
-
-        Matching stays exact on ``(gene, drug)``, case-normalised. A result
-        the LLM invented will not match any row and stays unevidenced,
-        which is the correct outcome: citing the wrong row would be worse
-        than citing none, because it would look right.
-        """
-        unevidenced = [r for r in result_list.results if not r.provenance]
-        if not unevidenced:
-            return
-
-        # The answer already exists at this point; only its evidence is
-        # missing. A failure here (database unavailable, timeout) must not
-        # turn a successful turn into a failed one — the findings simply
-        # stay unevidenced, which the UI reports honestly as "No database
-        # record was linked to this finding".
-        #
-        # Logged rather than swallowed: an unexplained gap in the evidence
-        # chain is precisely the thing this whole mechanism exists to make
-        # visible.
-        try:
-            rows = await self._repo.get_patient_pgx(ctx, patient_id)
-        except Exception as exc:  # noqa: BLE001 — see above
-            _logger.warning(
-                "pgx.provenance_backfill_failed",
-                extra={
-                    "patient_id": patient_id,
-                    "unevidenced_count": len(unevidenced),
-                    "error": f"{exc.__class__.__name__}: {exc}",
-                },
-            )
-            return
-
-        by_key: dict[tuple[str, str], PGXDrugResult] = {
-            (row.gene.upper(), (row.drug or "").lower()): row
-            for row in rows
-            if row.gene
-        }
-
-        for result in unevidenced:
-            if not result.gene:
-                continue
-            match = by_key.get(
-                (result.gene.upper(), (result.drug or "").lower())
-            )
-            if match is not None and match.provenance:
-                result.provenance.extend(match.provenance)
-
-        still_unevidenced = sum(1 for r in result_list.results if not r.provenance)
-        _logger.info(
-            "pgx.provenance_backfilled",
-            extra={
-                "patient_id": patient_id,
-                "unevidenced_before": len(unevidenced),
-                "unevidenced_after": still_unevidenced,
-                "rows_available": len(by_key),
-            },
+        # explore_patient_pgx returns gene + diplotype + phenotype, which
+        # for a normal-function patient is already the whole answer — so
+        # the agent often never calls the provenance-bearing get_*.
+        await backfill_provenance_from_repository(
+            domain="pgx",
+            patient_id=patient_id,
+            results=result_list.results,
+            fetch_rows=lambda: self._repo.get_patient_pgx(ctx, patient_id),
+            key_of=lambda r: (
+                normalise_key_part(r.gene),
+                normalise_key_part(r.drug),
+            ),
         )
+        return result_list
 
     def apply_derived_fields(
         self,

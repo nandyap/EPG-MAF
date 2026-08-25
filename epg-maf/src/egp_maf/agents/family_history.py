@@ -27,6 +27,8 @@ from egp_maf.agents.base import (
     SpecialistBase,
     ToolCall,
     attach_provenance_to_results,
+    backfill_provenance_from_repository,
+    normalise_key_part,
 )
 from egp_maf.agents.state_outputs import FamilyHistoryStateOutput
 from egp_maf.agents.tool_shims import build_family_history_tools
@@ -135,6 +137,25 @@ class FamilyHistorySpecialist(SpecialistBase[FamilyHistoryResultList]):
             tool_fields_derived=_TOOL_FIELDS_DERIVED,
             row_matches_result=_row_matches_result,
             provenance_builder=self._provenance_service.build,
+        )
+
+        # Unlike PGx and genomic variants, this domain DOES call
+        # get_patient_family_history every turn — the matcher is what
+        # fails. It compares the LLM's wording of (disease_name,
+        # criteria_name) to the row with ``==``, so "Hereditary Breast
+        # Cancer" against "hereditary breast cancer" yields no evidence.
+        # Observed live 2026-08-25.
+        await backfill_provenance_from_repository(
+            domain="family_history",
+            patient_id=patient_id,
+            results=result_list.results,
+            fetch_rows=lambda: self._repo.get_patient_family_history(
+                ctx, patient_id
+            ),
+            key_of=lambda r: (
+                normalise_key_part(r.disease_name),
+                normalise_key_part(r.criteria_name),
+            ),
         )
         return result_list
 
