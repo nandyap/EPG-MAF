@@ -1,298 +1,161 @@
-Good news, PGX now seems to be fixed.
-
-Varinat too has no provenance, can we check that also the information is missing few things as expected in the golden dataset.
-Did it check the annotations table at all, the search part.
-Can we fix the provenance part and will test again if the missing parts are now coming.
-
-Also same observation for family hostory and same questions for it as well.
-Also checked for phenotype and it seems to be working, provenance is attached.
-
-Below is the backend log, the cosmos log keep spanning the logs can we remove that if it is not required 
-and was added to resolve the issues for cosmos, had to remove it manually takes a lot of time and kept one in the end for your reference. 
-
-2026-08-25T08:38:46.0390825Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-
-2026-08-25T08:38:46.2644980Z stdout F 2026-08-25T08:38:46.263651Z [info     ] chat_router.decided            env=dev needs_clinical_data=True reset_agents=[] service=egp-maf service_version=0.1.0-dev thread_id=T-820b3663ee074351
-2026-08-25T08:38:46.3159747Z stdout F Completed superstep 1
-2026-08-25T08:38:46.3160238Z stdout F Starting superstep 2
-2026-08-25T08:38:46.3165834Z stdout F Starting superstep 1
-
-2026-08-25T08:38:47.0184988Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:38:47.0204826Z stdout F 2026-08-25T08:38:47.020196Z [info     ] orch_router.dispatched         dispatch=['pgx'] env=dev iterations=1 orch.mode=sequential orch.width=1 reason=The query requests the pharmacogenomic profile, which should be handled by the pgx_agent. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:38:47.0711830Z stdout F Completed superstep 1
-2026-08-25T08:38:47.0712083Z stdout F Starting superstep 2
-2026-08-25T08:38:47.1220186Z stdout F Completed superstep 2
-2026-08-25T08:38:47.1221281Z stdout F Starting superstep 3
-
-2026-08-25T08:38:47.3786927Z stdout F INFO:     127.0.0.1:34474 - "GET /healthz HTTP/1.1" 200 OK
-2026-08-25T08:38:47.6293236Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:38:47.6687460Z stdout F Function name: explore_patient_pgx
-2026-08-25T08:38:47.6688912Z stdout F authz.granted
-2026-08-25T08:38:47.6773648Z stdout F Function explore_patient_pgx succeeded.
-2026-08-25T08:38:47.6775603Z stdout F Function duration: 0.008530s
-
-2026-08-25T08:38:48.2202512Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:38:48.2220016Z stdout F Function name: get_patient_pgx
-2026-08-25T08:38:48.2221082Z stdout F authz.granted
-2026-08-25T08:38:48.2328376Z stdout F Function get_patient_pgx succeeded.
-2026-08-25T08:38:48.2328707Z stdout F Function duration: 0.010433s
-
-2026-08-25T08:38:49.9451313Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-
-2026-08-25T08:38:55.3290213Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:38:55.3310531Z stdout F specialist.run.completed
-2026-08-25T08:38:55.3315264Z stdout F 2026-08-25T08:38:55.331341Z [info     ] specialist.executor.completed  duration_ms=8208 env=dev service=egp-maf service_version=0.1.0-dev specialist=pgx status=completed
-2026-08-25T08:38:55.3812305Z stdout F Completed superstep 3
-2026-08-25T08:38:55.3813599Z stdout F Starting superstep 4
-2026-08-25T08:38:55.3823625Z stdout F 2026-08-25T08:38:55.382143Z [info     ] specialist_joiner.merged       agents_completed=['pgx'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:38:55.4330835Z stdout F Completed superstep 4
-2026-08-25T08:38:55.4331030Z stdout F Starting superstep 5
-
-2026-08-25T08:38:56.2962229Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:38:56.2978033Z stdout F 2026-08-25T08:38:56.297569Z [info     ] orch_router.terminal           agents_completed=['pgx'] env=dev iterations=1 reason=The pharmacogenomic profile has already been assessed by the pgx_agent; no further relevant specialists remain for this query. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:38:56.3503518Z stdout F Completed superstep 5
-2026-08-25T08:38:56.3503820Z stdout F Workflow completed after 5 supersteps
-2026-08-25T08:38:56.3507694Z stdout F 2026-08-25T08:38:56.350427Z [info     ] run_orchestration.completed    agents_completed=['pgx'] env=dev iterations=1 service=egp-maf service_version=0.1.0-dev thread_id=T-820b3663ee074351
-2026-08-25T08:38:56.4016820Z stdout F Completed superstep 2
-2026-08-25T08:38:56.4017777Z stdout F Starting superstep 3
-
-2026-08-25T08:38:57.3768390Z stdout F INFO:     127.0.0.1:60328 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:01.4559874Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:39:01.4573547Z stdout F 2026-08-25T08:39:01.457127Z [info     ] synthesize_response.completed  env=dev message_count=2 service=egp-maf service_version=0.1.0-dev thread_id=T-820b3663ee074351
-2026-08-25T08:39:01.5073322Z stdout F Completed superstep 3
-2026-08-25T08:39:01.5073600Z stdout F Workflow completed after 3 supersteps
-2026-08-25T08:39:01.5936682Z stdout F INFO:     100.100.209.4:0 - "GET /threads HTTP/1.1" 200 OK
-
-2026-08-25T08:39:07.3793166Z stdout F INFO:     127.0.0.1:47822 - "GET /healthz HTTP/1.1" 200 OK
-2026-08-25T08:39:07.3804004Z stdout F INFO:     127.0.0.1:47838 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:17.3812193Z stdout F INFO:     127.0.0.1:41274 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:18.7504386Z stdout F     'Date': 'Tue, 25 Aug 2026 08:39:18 GMT'
-2026-08-25T08:39:18.7505771Z stdout F INFO:     100.100.209.4:0 - "GET /threads/T-2f4f0d827f6c4678 HTTP/1.1" 200 OK
-
-2026-08-25T08:39:27.3772881Z stdout F INFO:     127.0.0.1:32994 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:37.3800324Z stdout F INFO:     127.0.0.1:53844 - "GET /healthz HTTP/1.1" 200 OK
-2026-08-25T08:39:37.3800736Z stdout F INFO:     127.0.0.1:53860 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:47.3768459Z stdout F INFO:     127.0.0.1:51204 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:39:57.3755075Z stdout F INFO:     127.0.0.1:49086 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:40:05.6185604Z stdout F authz.granted
-2026-08-25T08:40:05.6995062Z stdout F     'Date': 'Tue, 25 Aug 2026 08:40:04 GMT'
-2026-08-25T08:40:05.6995077Z stdout F 2026-08-25T08:40:05.699280Z [info     ] threads.created                clinician_id=demo env=dev has_title=True patient_id=HG04008 service=egp-maf service_version=0.1.0-dev thread_id=T-f96a11525b6540e7
-2026-08-25T08:40:05.6997138Z stdout F INFO:     100.100.209.4:0 - "POST /threads HTTP/1.1" 200 OK
-2026-08-25T08:40:05.7039150Z stdout F Response status: 200
-2026-08-25T08:40:05.7039322Z stdout F Response headers:
-2026-08-25T08:40:05.7039397Z stdout F     'Cache-Control': 'no-store, no-cache'
-2026-08-25T08:40:05.7039412Z stdout F     'Pragma': 'no-cache'
-2026-08-25T08:40:05.7039422Z stdout F     'Transfer-Encoding': 'REDACTED'
-2026-08-25T08:40:05.7039431Z stdout F     'Content-Type': 'application/json'
-2026-08-25T08:40:21.1607684Z stdout F     'x-ms-gatewayversion': 'version=2.14.0'
-2026-08-25T08:40:21.1607699Z stdout F     'Date': 'Tue, 25 Aug 2026 08:40:21 GMT'
-2026-08-25T08:40:21.1609223Z stdout F Starting superstep 1
-
-2026-08-25T08:40:22.2947974Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:22.2967281Z stdout F 2026-08-25T08:40:22.296349Z [info     ] chat_router.decided            env=dev needs_clinical_data=True reset_agents=[] service=egp-maf service_version=0.1.0-dev thread_id=T-f96a11525b6540e7
-2026-08-25T08:40:22.3464118Z stdout F Completed superstep 1
-2026-08-25T08:40:22.3464402Z stdout F Starting superstep 2
-2026-08-25T08:40:22.3470716Z stdout F Starting superstep 1
-
-2026-08-25T08:40:23.2102582Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:23.2121390Z stdout F 2026-08-25T08:40:23.211846Z [info     ] orch_router.dispatched         dispatch=['family_history'] env=dev iterations=1 orch.mode=sequential orch.width=1 reason=The query asks about family history of hereditary breast cancer and the reliability of that assessment, which is handled by the family_history_agent. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:40:23.2627447Z stdout F Completed superstep 1
-2026-08-25T08:40:23.2627805Z stdout F Starting superstep 2
-
-2026-08-25T08:40:23.3138657Z stdout F Completed superstep 2
-2026-08-25T08:40:23.3138984Z stdout F Starting superstep 3
-2026-08-25T08:40:23.8186226Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:23.8572471Z stdout F Function name: explore_patient_family_history
-2026-08-25T08:40:23.8574094Z stdout F authz.granted
-2026-08-25T08:40:23.8669283Z stdout F Function explore_patient_family_history succeeded.
-2026-08-25T08:40:23.8670526Z stdout F Function duration: 0.009491s
-
-2026-08-25T08:40:25.1869710Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:25.1888595Z stdout F Function name: search_family_history_annotations
-2026-08-25T08:40:25.1980885Z stdout F Function search_family_history_annotations succeeded.
-2026-08-25T08:40:25.1981095Z stdout F Function duration: 0.009077s
-
-2026-08-25T08:40:26.9203859Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:26.9224882Z stdout F Function name: get_patient_family_history
-2026-08-25T08:40:26.9226473Z stdout F authz.granted
-2026-08-25T08:40:26.9296352Z stdout F Function get_patient_family_history succeeded.
-2026-08-25T08:40:26.9296559Z stdout F Function duration: 0.007010s
-
-2026-08-25T08:40:27.3761920Z stdout F INFO:     127.0.0.1:37274 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:40:28.6069902Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-
-2026-08-25T08:40:31.0255119Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:31.0272680Z stdout F provenance.results_unevidenced
-2026-08-25T08:40:31.0274025Z stdout F specialist.run.completed
-2026-08-25T08:40:31.0278654Z stdout F 2026-08-25T08:40:31.027666Z [info     ] specialist.executor.completed  duration_ms=7712 env=dev service=egp-maf service_version=0.1.0-dev specialist=family_history status=completed
-2026-08-25T08:40:31.0786167Z stdout F Completed superstep 3
-2026-08-25T08:40:31.0786388Z stdout F Starting superstep 4
-2026-08-25T08:40:31.0794694Z stdout F 2026-08-25T08:40:31.079231Z [info     ] specialist_joiner.merged       agents_completed=['family_history'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:40:31.1301802Z stdout F Completed superstep 4
-2026-08-25T08:40:31.1302053Z stdout F Starting superstep 5
-
-2026-08-25T08:40:32.4186293Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:32.4202849Z stdout F 2026-08-25T08:40:32.420033Z [info     ] orch_router.terminal           agents_completed=['family_history'] env=dev iterations=1 reason=The family_history_agent has already completed, and it is the only relevant specialist for assessing family history of hereditary breast cancer. No further specialists are needed. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:40:32.4712154Z stdout F Completed superstep 5
-2026-08-25T08:40:32.4712546Z stdout F Workflow completed after 5 supersteps
-2026-08-25T08:40:32.4715727Z stdout F 2026-08-25T08:40:32.471377Z [info     ] run_orchestration.completed    agents_completed=['family_history'] env=dev iterations=1 service=egp-maf service_version=0.1.0-dev thread_id=T-f96a11525b6540e7
-2026-08-25T08:40:32.5221610Z stdout F Completed superstep 2
-2026-08-25T08:40:32.5221865Z stdout F Starting superstep 3
-
-2026-08-25T08:40:37.3776995Z stdout F INFO:     127.0.0.1:39878 - "GET /healthz HTTP/1.1" 200 OK
-2026-08-25T08:40:37.3798645Z stdout F INFO:     127.0.0.1:39894 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:40:39.0697579Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:40:39.0715276Z stdout F 2026-08-25T08:40:39.071289Z [info     ] synthesize_response.completed  env=dev message_count=2 service=egp-maf service_version=0.1.0-dev thread_id=T-f96a11525b6540e7
-2026-08-25T08:40:39.1221103Z stdout F Completed superstep 3
-2026-08-25T08:40:39.1221376Z stdout F Workflow completed after 3 supersteps
-2026-08-25T08:41:46.0334922Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:46.0352480Z stdout F 2026-08-25T08:41:46.034972Z [info     ] chat_router.decided            env=dev needs_clinical_data=True reset_agents=[] service=egp-maf service_version=0.1.0-dev thread_id=T-8f580ab48ce3479b
-2026-08-25T08:41:46.0860232Z stdout F Completed superstep 1
-2026-08-25T08:41:46.0861010Z stdout F Starting superstep 2
-2026-08-25T08:41:46.0866702Z stdout F Starting superstep 1
-
-2026-08-25T08:41:46.9328700Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:46.9345828Z stdout F 2026-08-25T08:41:46.934325Z [info     ] orch_router.dispatched         dispatch=['genomic_variants'] env=dev iterations=1 orch.mode=sequential orch.width=1 reason=The query requests all genomic variants and their clinical annotations for the patient, which is handled by the genomic_variants_agent. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:41:46.9844728Z stdout F Completed superstep 1
-2026-08-25T08:41:46.9845237Z stdout F Starting superstep 2
-2026-08-25T08:41:47.0352466Z stdout F Completed superstep 2
-2026-08-25T08:41:47.0353312Z stdout F Starting superstep 3
-2026-08-25T08:41:47.6470515Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:47.6491670Z stdout F Function name: explore_patient_genomic_variants
-2026-08-25T08:41:47.6492701Z stdout F authz.granted
-2026-08-25T08:41:47.6553982Z stdout F Function explore_patient_genomic_variants succeeded.
-2026-08-25T08:41:47.6554283Z stdout F Function duration: 0.006001s
-2026-08-25T08:41:48.2377173Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:48.2395529Z stdout F Function name: search_variant_annotations
-2026-08-25T08:41:48.2464508Z stdout F Function search_variant_annotations succeeded.
-2026-08-25T08:41:48.2464713Z stdout F Function duration: 0.006914s
-
-2026-08-25T08:41:48.8151007Z stdout F INFO:     127.0.0.1:60440 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:41:51.1066467Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-
-2026-08-25T08:41:53.8064293Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:53.8089567Z stdout F 2026-08-25T08:41:53.808387Z [warning  ] variant.unknown_value          env=dev field=pathogenicity service=egp-maf service_version=0.1.0-dev value=pathogenic
-2026-08-25T08:41:53.8089883Z stdout F provenance.results_unevidenced
-2026-08-25T08:41:53.8090002Z stdout F specialist.run.completed
-2026-08-25T08:41:53.8091010Z stdout F 2026-08-25T08:41:53.808973Z [info     ] specialist.executor.completed  duration_ms=6773 env=dev service=egp-maf service_version=0.1.0-dev specialist=genomic_variants status=completed
-2026-08-25T08:41:53.8597580Z stdout F Completed superstep 3
-2026-08-25T08:41:53.8598772Z stdout F Starting superstep 4
-2026-08-25T08:41:53.8605917Z stdout F 2026-08-25T08:41:53.860394Z [info     ] specialist_joiner.merged       agents_completed=['genomic_variants'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:41:53.9103864Z stdout F Completed superstep 4
-2026-08-25T08:41:53.9104531Z stdout F Starting superstep 5
-
-2026-08-25T08:41:54.8730039Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:41:54.8857490Z stdout F 2026-08-25T08:41:54.884922Z [info     ] orch_router.terminal           agents_completed=['genomic_variants'] env=dev iterations=1 reason=The query requested all genomic variants and the genomic_variants_agent has already completed. No further relevant specialists remain to be dispatched. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:41:54.9352503Z stdout F Completed superstep 5
-2026-08-25T08:41:54.9352802Z stdout F Workflow completed after 5 supersteps
-2026-08-25T08:41:54.9354889Z stdout F 2026-08-25T08:41:54.935319Z [info     ] run_orchestration.completed    agents_completed=['genomic_variants'] env=dev iterations=1 service=egp-maf service_version=0.1.0-dev thread_id=T-8f580ab48ce3479b
-2026-08-25T08:41:54.9852286Z stdout F Completed superstep 2
-2026-08-25T08:41:54.9852576Z stdout F Starting superstep 3
-
-2026-08-25T08:41:57.3764752Z stdout F INFO:     127.0.0.1:60450 - "GET /healthz HTTP/1.1" 200 OK
-
-2026-08-25T08:42:01.3415649Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:42:01.3436172Z stdout F 2026-08-25T08:42:01.342784Z [info     ] synthesize_response.completed  env=dev message_count=2 service=egp-maf service_version=0.1.0-dev thread_id=T-8f580ab48ce3479b
-2026-08-25T08:42:01.3939003Z stdout F Completed superstep 3
-2026-08-25T08:42:01.3939934Z stdout F Workflow completed after 3 supersteps
-2026-08-25T08:42:01.3958560Z stdout F Request URL: 'https://cosmos-ailz-egpwin-dev-m42-aen-001-uaenorth.documents.azure.com:443/dbs/egp/colls/sessions/docs/T-8f580ab48ce3479b/'
-2026-08-25T08:42:01.3958850Z stdout F Request method: 'PUT'
-2026-08-25T08:42:01.3958989Z stdout F Request headers:
-2026-08-25T08:42:01.3959020Z stdout F     'Cache-Control': 'no-cache'
-2026-08-25T08:42:01.3959038Z stdout F     'x-ms-version': '2020-07-15'
-2026-08-25T08:42:01.3959053Z stdout F     'x-ms-documentdb-query-iscontinuationexpected': 'False'
-2026-08-25T08:42:01.3959194Z stdout F     'x-ms-cosmos-sdk-supportedcapabilities': '1'
-2026-08-25T08:42:01.3959213Z stdout F     'x-ms-activity-id': 'f831ce4b-236e-4473-b3fc-b8c113bbb52f'
-2026-08-25T08:42:01.3959223Z stdout F     'If-Match': '"0e02e696-0000-3200-0000-6a8d55430000"'
-2026-08-25T08:42:01.3959233Z stdout F     'x-ms-documentdb-partitionkey': '["demo"]'
-2026-08-25T08:42:01.3959243Z stdout F     'x-ms-date': 'Tue, 25 Aug 2026 08:42:01 GMT'
-2026-08-25T08:42:01.3959252Z stdout F     'Content-Type': 'application/json'
-2026-08-25T08:42:01.3959262Z stdout F     'Accept': 'application/json'
-2026-08-25T08:42:01.3959300Z stdout F     'x-ms-client-id': '0104c596-8192-497d-b56f-76893de22304'
-2026-08-25T08:42:01.3959313Z stdout F     'x-ms-cosmos-intended-collection-rid': 'DqFcAKjthO8='
-2026-08-25T08:42:01.3959333Z stdout F     'x-ms-thinclient-proxy-resource-type': 'docs'
-2026-08-25T08:42:01.3959342Z stdout F     'x-ms-thinclient-proxy-operation-type': 'Replace'
-2026-08-25T08:42:01.3959350Z stdout F     'Content-Length': '3333'
-2026-08-25T08:42:01.3959359Z stdout F     'User-Agent': 'azsdk-python-cosmos-async/4.16.3 Python/3.12.14 (Linux-6.6.139.1-1.azl3-x86_64-with-glibc2.36)'
-2026-08-25T08:42:01.3959811Z stdout F     'authorization': 'REDACTED'
-2026-08-25T08:42:01.3959845Z stdout F A body is sent with the request
-2026-08-25T08:42:01.4459342Z stdout F Response status: 200
-2026-08-25T08:42:01.4459656Z stdout F Response headers:
-2026-08-25T08:42:01.4459814Z stdout F     'Cache-Control': 'no-store, no-cache'
-2026-08-25T08:42:01.4459833Z stdout F     'Pragma': 'no-cache'
-2026-08-25T08:42:01.4459844Z stdout F     'Transfer-Encoding': 'REDACTED'
-2026-08-25T08:42:01.4459853Z stdout F     'Content-Type': 'application/json'
-
-
-Phenotype log
-
-2026-08-25T08:54:42.6572452Z stdout F Starting superstep 1
-2026-08-25T08:54:43.8216659Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:43.8217176Z stdout F 2026-08-25T08:54:43.821100Z [info     ] chat_router.decided            env=dev needs_clinical_data=True reset_agents=[] service=egp-maf service_version=0.1.0-dev thread_id=T-5500b72f8684451a
-2026-08-25T08:54:43.8719851Z stdout F Completed superstep 1
-2026-08-25T08:54:43.8720320Z stdout F Starting superstep 2
-2026-08-25T08:54:43.8725471Z stdout F Starting superstep 1
-2026-08-25T08:54:44.5711408Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:44.5727844Z stdout F 2026-08-25T08:54:44.572540Z [info     ] orch_router.dispatched         dispatch=['phenotype'] env=dev iterations=1 orch.mode=sequential orch.width=1 reason=The query asks for the patient's diagnoses, which should be handled by the phenotype_agent. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:54:44.6222534Z stdout F Completed superstep 1
-2026-08-25T08:54:44.6222814Z stdout F Starting superstep 2
-2026-08-25T08:54:44.6723174Z stdout F Completed superstep 2
-2026-08-25T08:54:44.6723620Z stdout F Starting superstep 3
-2026-08-25T08:54:45.2383068Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:45.2397742Z stdout F Function name: explore_patient_phenotype
-2026-08-25T08:54:45.2398733Z stdout F authz.granted
-2026-08-25T08:54:45.2454527Z stdout F Function explore_patient_phenotype succeeded.
-2026-08-25T08:54:45.2454734Z stdout F Function duration: 0.005442s
-2026-08-25T08:54:46.0950421Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:46.0966259Z stdout F Function name: get_patient_diagnoses
-2026-08-25T08:54:46.0967237Z stdout F authz.granted
-2026-08-25T08:54:46.0971599Z stdout F Function name: get_patient_diagnoses
-2026-08-25T08:54:46.0972240Z stdout F authz.granted
-2026-08-25T08:54:46.0976460Z stdout F Function name: get_patient_diagnoses
-2026-08-25T08:54:46.0977097Z stdout F authz.granted
-2026-08-25T08:54:46.0980548Z stdout F Function name: get_patient_diagnoses
-2026-08-25T08:54:46.0984496Z stdout F authz.granted
-2026-08-25T08:54:46.0986596Z stdout F AppServiceCredential.get_token succeeded
-2026-08-25T08:54:46.0986679Z stdout F ManagedIdentityCredential.get_token succeeded
-2026-08-25T08:54:46.0986724Z stdout F DefaultAzureCredential acquired a token from ManagedIdentityCredential
-2026-08-25T08:54:46.1098989Z stdout F Function get_patient_diagnoses succeeded.
-2026-08-25T08:54:46.1099165Z stdout F Function duration: 0.012042s
-2026-08-25T08:54:46.1102274Z stdout F Function get_patient_diagnoses succeeded.
-2026-08-25T08:54:46.1102440Z stdout F Function duration: 0.013542s
-2026-08-25T08:54:46.1104743Z stdout F Function get_patient_diagnoses succeeded.
-2026-08-25T08:54:46.1104889Z stdout F Function duration: 0.013251s
-2026-08-25T08:54:46.1189706Z stdout F Function get_patient_diagnoses succeeded.
-2026-08-25T08:54:46.1189876Z stdout F Function duration: 0.020600s
-2026-08-25T08:54:47.3773287Z stdout F INFO:     127.0.0.1:51018 - "GET /healthz HTTP/1.1" 200 OK
-2026-08-25T08:54:47.7500376Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:50.3416184Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:50.3457150Z stdout F specialist.run.completed
-2026-08-25T08:54:50.3460479Z stdout F 2026-08-25T08:54:50.345839Z [info     ] specialist.executor.completed  duration_ms=5672 env=dev service=egp-maf service_version=0.1.0-dev specialist=phenotype status=completed
-2026-08-25T08:54:50.3970415Z stdout F Completed superstep 3
-2026-08-25T08:54:50.3970703Z stdout F Starting superstep 4
-2026-08-25T08:54:50.3977799Z stdout F 2026-08-25T08:54:50.397590Z [info     ] specialist_joiner.merged       agents_completed=['phenotype'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:54:50.4479752Z stdout F Completed superstep 4
-2026-08-25T08:54:50.4480025Z stdout F Starting superstep 5
-2026-08-25T08:54:51.1846498Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:51.1862507Z stdout F 2026-08-25T08:54:51.186028Z [info     ] orch_router.terminal           agents_completed=['phenotype'] env=dev iterations=1 reason=The phenotype_agent has already been dispatched, and no other specialists are relevant for a query about patient diagnoses. Orchestration is complete. service=egp-maf service_version=0.1.0-dev
-2026-08-25T08:54:51.2362510Z stdout F Completed superstep 5
-2026-08-25T08:54:51.2362829Z stdout F Workflow completed after 5 supersteps
-2026-08-25T08:54:51.2366419Z stdout F 2026-08-25T08:54:51.236376Z [info     ] run_orchestration.completed    agents_completed=['phenotype'] env=dev iterations=1 service=egp-maf service_version=0.1.0-dev thread_id=T-5500b72f8684451a
-2026-08-25T08:54:51.2862523Z stdout F Completed superstep 2
-2026-08-25T08:54:51.2862763Z stdout F Starting superstep 3
-2026-08-25T08:54:53.0028084Z stdout F HTTP Request: POST https://api.core42.ai/v1/responses "HTTP/1.1 200 OK"
-2026-08-25T08:54:53.0039669Z stdout F 2026-08-25T08:54:53.003779Z [info     ] synthesize_response.completed  env=dev message_count=2 service=egp-maf service_version=0.1.0-dev thread_id=T-5500b72f8684451a
-2026-08-25T08:54:53.0549203Z stdout F Completed superstep 3
-2026-08-25T08:54:53.0549645Z stdout F Workflow completed after 3 supersteps
-2026-08-25T08:54:53.0559401Z stdout F Request URL: 'https://cosmos-ailz-egpwin-dev-m42-aen-001-uaenorth.documents.azure.com:443/dbs/egp/colls/sessions/docs/T-5500b72f8684451a/'
-2026-08-25T08:54:53.0559526Z stdout F Request method: 'PUT'
+2026-08-25T11:06:24.2157780Z stdout F INFO:     127.0.0.1:43146 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:06:24.3915553Z stdout F 2026-08-25T11:06:24.390826Z [info     ] threads.deleted                clinician_id=demo env=dev service=egp-maf service_version=0.1.0-dev thread_id=T-fd67953acf2b4908
+2026-08-25T11:06:24.3918526Z stdout F INFO:     100.100.209.6:0 - "DELETE /threads/T-fd67953acf2b4908 HTTP/1.1" 204 No Content
+2026-08-25T11:06:34.2154126Z stdout F INFO:     127.0.0.1:34042 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:06:35.1099690Z stdout F authz.granted
+2026-08-25T11:06:35.1772727Z stdout F 2026-08-25T11:06:35.176880Z [info     ] threads.created                clinician_id=demo env=dev has_title=True patient_id=HG00099 service=egp-maf service_version=0.1.0-dev thread_id=T-6dbefb64fa5f4e2e
+2026-08-25T11:06:35.1775427Z stdout F INFO:     100.100.209.6:0 - "POST /threads HTTP/1.1" 200 OK
+2026-08-25T11:06:35.2421659Z stdout F INFO:     100.100.209.6:0 - "GET /threads HTTP/1.1" 200 OK
+2026-08-25T11:06:35.3077942Z stdout F INFO:     100.100.209.6:0 - "GET /threads/T-6dbefb64fa5f4e2e HTTP/1.1" 200 OK
+2026-08-25T11:06:44.2170462Z stdout F INFO:     127.0.0.1:51542 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:06:47.2501300Z stdout F Starting superstep 1
+2026-08-25T11:06:49.1517257Z stdout F 2026-08-25T11:06:49.151307Z [info     ] chat_router.decided            env=dev needs_clinical_data=True reset_agents=[] service=egp-maf service_version=0.1.0-dev thread_id=T-6dbefb64fa5f4e2e
+2026-08-25T11:06:49.2015303Z stdout F Completed superstep 1
+2026-08-25T11:06:49.2016210Z stdout F Starting superstep 2
+2026-08-25T11:06:49.2021760Z stdout F Starting superstep 1
+2026-08-25T11:06:50.1562302Z stdout F 2026-08-25T11:06:50.155814Z [info     ] orch_router.dispatched         dispatch=['genomic_variants'] env=dev iterations=1 orch.mode=sequential orch.width=1 reason=The query requests a comprehensive cancer risk assessment, explicitly mentioning variants, PRS, family history, and diagnoses. According to the routing rules, we begin by dispatching the genomic_variants_agent to assess rare variants related to cancer risk. service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:06:50.2072425Z stdout F Completed superstep 1
+2026-08-25T11:06:50.2072916Z stdout F Starting superstep 2
+2026-08-25T11:06:50.2583607Z stdout F Completed superstep 2
+2026-08-25T11:06:50.2585257Z stdout F Starting superstep 3
+2026-08-25T11:06:50.8486499Z stdout F Function name: explore_patient_genomic_variants
+2026-08-25T11:06:50.8487621Z stdout F authz.granted
+2026-08-25T11:06:50.8581050Z stdout F Function explore_patient_genomic_variants succeeded.
+2026-08-25T11:06:50.8582402Z stdout F Function duration: 0.009215s
+2026-08-25T11:06:51.7311444Z stdout F Function name: search_variant_annotations
+2026-08-25T11:06:51.7315730Z stdout F Function name: search_variant_annotations
+2026-08-25T11:06:51.7318729Z stdout F Function name: search_variant_annotations
+2026-08-25T11:06:51.7322264Z stdout F Function name: search_variant_annotations
+2026-08-25T11:06:51.7372731Z stdout F Function search_variant_annotations succeeded.
+2026-08-25T11:06:51.7373057Z stdout F Function duration: 0.005482s
+2026-08-25T11:06:51.7396900Z stdout F Function search_variant_annotations succeeded.
+2026-08-25T11:06:51.7397036Z stdout F Function duration: 0.008488s
+2026-08-25T11:06:51.7414368Z stdout F Function search_variant_annotations succeeded.
+2026-08-25T11:06:51.7414509Z stdout F Function duration: 0.009427s
+2026-08-25T11:06:51.7417683Z stdout F Function search_variant_annotations succeeded.
+2026-08-25T11:06:51.7417992Z stdout F Function duration: 0.009423s
+2026-08-25T11:06:52.3571054Z stdout F Function name: get_patient_genomic_variants
+2026-08-25T11:06:52.3572350Z stdout F authz.granted
+2026-08-25T11:06:52.3687340Z stdout F Function get_patient_genomic_variants succeeded.
+2026-08-25T11:06:52.3687756Z stdout F Function duration: 0.011271s
+2026-08-25T11:06:53.2912337Z stdout F Function name: get_patient_genomic_variants
+2026-08-25T11:06:53.2913860Z stdout F authz.granted
+2026-08-25T11:06:53.2930706Z stdout F Function name: get_patient_genomic_variants
+2026-08-25T11:06:53.2931058Z stdout F authz.granted
+2026-08-25T11:06:53.2936838Z stdout F Function name: get_patient_genomic_variants
+2026-08-25T11:06:53.2937361Z stdout F authz.granted
+2026-08-25T11:06:53.2982611Z stdout F Function get_patient_genomic_variants succeeded.
+2026-08-25T11:06:53.2982830Z stdout F Function duration: 0.005138s
+2026-08-25T11:06:53.2987789Z stdout F Function get_patient_genomic_variants succeeded.
+2026-08-25T11:06:53.2987906Z stdout F Function duration: 0.007386s
+2026-08-25T11:06:53.3092365Z stdout F Function get_patient_genomic_variants succeeded.
+2026-08-25T11:06:53.3092579Z stdout F Function duration: 0.015169s
+2026-08-25T11:06:54.2181557Z stdout F INFO:     127.0.0.1:42422 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:06:54.2182043Z stdout F INFO:     127.0.0.1:42428 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:04.2144556Z stdout F INFO:     127.0.0.1:50468 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:07.9243015Z stdout F 2026-08-25T11:07:07.923840Z [warning  ] variant.unknown_value          env=dev field=pathogenicity service=egp-maf service_version=0.1.0-dev value=VUS
+2026-08-25T11:07:07.9245107Z stdout F specialist.run.completed
+2026-08-25T11:07:07.9250172Z stdout F 2026-08-25T11:07:07.924805Z [info     ] specialist.executor.completed  duration_ms=17665 env=dev service=egp-maf service_version=0.1.0-dev specialist=genomic_variants status=completed
+2026-08-25T11:07:07.9760301Z stdout F Completed superstep 3
+2026-08-25T11:07:07.9760965Z stdout F Starting superstep 4
+2026-08-25T11:07:07.9772293Z stdout F 2026-08-25T11:07:07.976987Z [info     ] specialist_joiner.merged       agents_completed=['genomic_variants'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:08.0286315Z stdout F Completed superstep 4
+2026-08-25T11:07:08.0287385Z stdout F Starting superstep 5
+2026-08-25T11:07:08.9708479Z stdout F 2026-08-25T11:07:08.970516Z [info     ] orch_router.dispatched         dispatch=['prs'] env=dev iterations=2 orch.mode=sequential orch.width=1 reason=The query requests a comprehensive cancer risk assessment, and PRS has not yet been run. PRS is relevant for cancer risk and should be filtered to cancer. service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:09.0208099Z stdout F Completed superstep 5
+2026-08-25T11:07:09.0208944Z stdout F Starting superstep 6
+2026-08-25T11:07:09.0718679Z stdout F Completed superstep 6
+2026-08-25T11:07:09.0719170Z stdout F Starting superstep 7
+2026-08-25T11:07:09.6288133Z stdout F Function name: explore_patient_prs
+2026-08-25T11:07:09.6290878Z stdout F authz.granted
+2026-08-25T11:07:09.6375954Z stdout F Function explore_patient_prs succeeded.
+2026-08-25T11:07:09.6376399Z stdout F Function duration: 0.008638s
+2026-08-25T11:07:10.2248462Z stdout F Function name: search_prs_annotations
+2026-08-25T11:07:10.2284238Z stdout F Function search_prs_annotations succeeded.
+2026-08-25T11:07:10.2284503Z stdout F Function duration: 0.003533s
+2026-08-25T11:07:10.9811923Z stdout F Function name: get_patient_prs
+2026-08-25T11:07:10.9813852Z stdout F authz.granted
+2026-08-25T11:07:10.9907933Z stdout F Function get_patient_prs succeeded.
+2026-08-25T11:07:10.9909225Z stdout F Function duration: 0.009712s
+2026-08-25T11:07:14.2137675Z stdout F INFO:     127.0.0.1:53774 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:17.2713513Z stdout F specialist.run.completed
+2026-08-25T11:07:17.2716110Z stdout F 2026-08-25T11:07:17.271375Z [info     ] specialist.executor.completed  duration_ms=8198 env=dev service=egp-maf service_version=0.1.0-dev specialist=prs status=completed
+2026-08-25T11:07:17.3216428Z stdout F Completed superstep 7
+2026-08-25T11:07:17.3216938Z stdout F Starting superstep 8
+2026-08-25T11:07:17.3229045Z stdout F 2026-08-25T11:07:17.322669Z [info     ] specialist_joiner.merged       agents_completed=['genomic_variants', 'prs'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:17.3738081Z stdout F Completed superstep 8
+2026-08-25T11:07:17.3738835Z stdout F Starting superstep 9
+2026-08-25T11:07:18.5067712Z stdout F 2026-08-25T11:07:18.506438Z [warning  ] orch_router.parallel_decision_downgraded env=dev reason=The query requests a comprehensive cancer risk assessment, and the genomic_variants and prs agents have already completed. Family history and phenotype (diagnoses) are still relevant and have not yet run. Both should be dispatched, filtered to cancer. requested=['family_history', 'phenotype'] service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:18.5069698Z stdout F 2026-08-25T11:07:18.506664Z [info     ] orch_router.dispatched         dispatch=['family_history'] env=dev iterations=3 orch.mode=sequential orch.width=1 reason=The query requests a comprehensive cancer risk assessment, and the genomic_variants and prs agents have already completed. Family history and phenotype (diagnoses) are still relevant and have not yet run. Both should be dispatched, filtered to cancer. (downgraded to sequential per ORCH_DISPATCH_MODE) service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:18.5580462Z stdout F Completed superstep 9
+2026-08-25T11:07:18.5581001Z stdout F Starting superstep 10
+2026-08-25T11:07:18.6099014Z stdout F Completed superstep 10
+2026-08-25T11:07:18.6100858Z stdout F Starting superstep 11
+2026-08-25T11:07:19.1554613Z stdout F Function name: explore_patient_family_history
+2026-08-25T11:07:19.1555114Z stdout F authz.granted
+2026-08-25T11:07:19.1660603Z stdout F Function explore_patient_family_history succeeded.
+2026-08-25T11:07:19.1661787Z stdout F Function duration: 0.010532s
+2026-08-25T11:07:19.6897287Z stdout F Function name: search_family_history_annotations
+2026-08-25T11:07:19.7087130Z stdout F Function search_family_history_annotations succeeded.
+2026-08-25T11:07:19.7087560Z stdout F Function duration: 0.018785s
+2026-08-25T11:07:20.2154896Z stdout F Function name: search_family_history_annotations
+2026-08-25T11:07:20.2227660Z stdout F Function search_family_history_annotations succeeded.
+2026-08-25T11:07:20.2228061Z stdout F Function duration: 0.004756s
+2026-08-25T11:07:20.8451447Z stdout F Function name: get_patient_family_history
+2026-08-25T11:07:20.8453154Z stdout F authz.granted
+2026-08-25T11:07:20.8531387Z stdout F Function get_patient_family_history succeeded.
+2026-08-25T11:07:20.8531668Z stdout F Function duration: 0.007521s
+2026-08-25T11:07:24.2157425Z stdout F INFO:     127.0.0.1:58886 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:24.2196106Z stdout F INFO:     127.0.0.1:58894 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:26.5816150Z stdout F provenance.results_unevidenced
+2026-08-25T11:07:26.5817827Z stdout F authz.granted
+2026-08-25T11:07:26.5903278Z stdout F provenance.backfilled
+2026-08-25T11:07:26.5904841Z stdout F specialist.run.completed
+2026-08-25T11:07:26.5907387Z stdout F 2026-08-25T11:07:26.590505Z [info     ] specialist.executor.completed  duration_ms=7978 env=dev service=egp-maf service_version=0.1.0-dev specialist=family_history status=completed
+2026-08-25T11:07:26.6407108Z stdout F Completed superstep 11
+2026-08-25T11:07:26.6407596Z stdout F Starting superstep 12
+2026-08-25T11:07:26.6421443Z stdout F 2026-08-25T11:07:26.641728Z [info     ] specialist_joiner.merged       agents_completed=['family_history', 'genomic_variants', 'prs'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:26.6930782Z stdout F Completed superstep 12
+2026-08-25T11:07:26.6935022Z stdout F Starting superstep 13
+2026-08-25T11:07:27.5652468Z stdout F 2026-08-25T11:07:27.564881Z [info     ] orch_router.dispatched         dispatch=['phenotype'] env=dev iterations=4 orch.mode=sequential orch.width=1 reason=The query requests a comprehensive cancer risk assessment, and the only relevant specialist not yet completed is phenotype_agent, which will provide information on cancer-related diagnoses and clinical history. service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:27.6159450Z stdout F Completed superstep 13
+2026-08-25T11:07:27.6160453Z stdout F Starting superstep 14
+2026-08-25T11:07:27.6680726Z stdout F Completed superstep 14
+2026-08-25T11:07:27.6681327Z stdout F Starting superstep 15
+2026-08-25T11:07:28.2465711Z stdout F Function name: explore_patient_phenotype
+2026-08-25T11:07:28.2466265Z stdout F authz.granted
+2026-08-25T11:07:28.2600561Z stdout F Function explore_patient_phenotype succeeded.
+2026-08-25T11:07:28.2600995Z stdout F Function duration: 0.011699s
+2026-08-25T11:07:32.1398971Z stdout F provenance.results_unevidenced
+2026-08-25T11:07:32.1400130Z stdout F specialist.run.completed
+2026-08-25T11:07:32.1401792Z stdout F 2026-08-25T11:07:32.139924Z [info     ] specialist.executor.completed  duration_ms=4468 env=dev service=egp-maf service_version=0.1.0-dev specialist=phenotype status=completed
+2026-08-25T11:07:32.1912453Z stdout F Completed superstep 15
+2026-08-25T11:07:32.1912926Z stdout F Starting superstep 16
+2026-08-25T11:07:32.1926760Z stdout F 2026-08-25T11:07:32.192443Z [info     ] specialist_joiner.merged       agents_completed=['family_history', 'genomic_variants', 'phenotype', 'prs'] branch_count=5 env=dev service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:32.2430527Z stdout F Completed superstep 16
+2026-08-25T11:07:32.2431070Z stdout F Starting superstep 17
+2026-08-25T11:07:32.9490600Z stdout F 2026-08-25T11:07:32.948733Z [info     ] orch_router.terminal           agents_completed=['family_history', 'genomic_variants', 'phenotype', 'prs'] env=dev iterations=4 reason=All relevant specialists (family_history, genomic_variants, phenotype, prs) have already been dispatched for a comprehensive cancer risk assessment. No further specialists are needed. service=egp-maf service_version=0.1.0-dev
+2026-08-25T11:07:33.0011855Z stdout F Completed superstep 17
+2026-08-25T11:07:33.0012379Z stdout F Workflow completed after 17 supersteps
+2026-08-25T11:07:33.0026664Z stdout F 2026-08-25T11:07:33.001223Z [info     ] run_orchestration.completed    agents_completed=['family_history', 'genomic_variants', 'phenotype', 'prs'] env=dev iterations=4 service=egp-maf service_version=0.1.0-dev thread_id=T-6dbefb64fa5f4e2e
+2026-08-25T11:07:33.0532444Z stdout F Completed superstep 2
+2026-08-25T11:07:33.0532902Z stdout F Starting superstep 3
+2026-08-25T11:07:34.2159204Z stdout F INFO:     127.0.0.1:41694 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:44.2158345Z stdout F INFO:     127.0.0.1:36356 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:54.2145458Z stdout F INFO:     127.0.0.1:35140 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:54.2151599Z stdout F INFO:     127.0.0.1:35144 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:07:57.1653374Z stdout F 2026-08-25T11:07:57.164820Z [info     ] synthesize_response.completed  env=dev message_count=2 service=egp-maf service_version=0.1.0-dev thread_id=T-6dbefb64fa5f4e2e
+2026-08-25T11:07:57.2156777Z stdout F Completed superstep 3
+2026-08-25T11:07:57.2157288Z stdout F Workflow completed after 3 supersteps
+2026-08-25T11:07:57.3564306Z stdout F INFO:     100.100.209.6:0 - "POST /chat HTTP/1.1" 200 OK
+2026-08-25T11:07:57.4259529Z stdout F INFO:     100.100.209.6:0 - "GET /threads HTTP/1.1" 200 OK
+2026-08-25T11:08:04.2156278Z stdout F INFO:     127.0.0.1:44990 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:14.2139520Z stdout F INFO:     127.0.0.1:37164 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:24.2165455Z stdout F INFO:     127.0.0.1:36238 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:24.2165888Z stdout F INFO:     127.0.0.1:36240 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:34.2129471Z stdout F INFO:     127.0.0.1:41008 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:44.2144090Z stdout F INFO:     127.0.0.1:46072 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:54.2142980Z stdout F INFO:     127.0.0.1:49066 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:08:54.2171699Z stdout F INFO:     127.0.0.1:49080 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:09:04.2148823Z stdout F INFO:     127.0.0.1:33134 - "GET /healthz HTTP/1.1" 200 OK
+2026-08-25T11:09:14.2141471Z stdout F INFO:     127.0.0.1:57034 - "GET /healthz HTTP/1.1" 200 OK
