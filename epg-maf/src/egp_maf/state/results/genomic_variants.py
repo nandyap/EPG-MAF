@@ -48,6 +48,29 @@ KNOWN_VARIANT_TYPES: list[str] = [
     "structural_variant",
 ]
 
+# Case-insensitive lookup back to the canonical spelling. The database
+# CHECK constraint on ``variant_annotations.pathogenicity`` enforces the
+# capitalised forms, so any other casing reaching us came from the LLM
+# re-typing a value it should have copied.
+_CANONICAL_PATHOGENICITY: dict[str, str] = {
+    v.casefold(): v for v in KNOWN_PATHOGENICITY_VALUES
+}
+_CANONICAL_VARIANT_TYPE: dict[str, str] = {
+    v.casefold(): v for v in KNOWN_VARIANT_TYPES
+}
+
+
+def _canonicalise(value: str | None, table: dict[str, str]) -> str | None:
+    """Return the canonical spelling of ``value`` if it is a known one.
+
+    Unrecognised values pass through untouched — ClinVar and pipeline
+    vocabularies evolve independently of this codebase, so an unfamiliar
+    term must never be rewritten or rejected, only reported.
+    """
+    if value is None:
+        return None
+    return table.get(" ".join(value.split()).casefold(), value)
+
 # ── Keys the parser recognises inside annotations_json ───────────────
 _TYPED_JSON_KEYS: frozenset[str] = frozenset(
     {
@@ -129,7 +152,55 @@ class VariantCoreAnnotations(BaseModel):
 
     @model_validator(mode="after")
     def _warn_unknown_values(self) -> "VariantCoreAnnotations":
-        """Emit a structured warning when values fall outside known lists."""
+        """Canonicalise known vocabulary casing, then warn on the rest.
+
+        The extraction pass has the LLM re-type ``pathogenicity`` from the
+        tool output, and it does not always preserve the database's
+        capitalisation — ``"Pathogenic"`` came back as ``"pathogenic"`` in
+        production on 2026-08-25.
+
+        Nothing rejected it, so the variant displayed correctly and the
+        reply read correctly. The damage was one level down:
+        ``apply_derived_fields`` computes ``pathogenic_count`` with
+        ``pathogenicity in {"Pathogenic", "Likely Pathogenic"}``, an exact
+        match. A patient with a pathogenic BRCA1 frameshift variant was
+        therefore counted as having **zero** pathogenic variants — an
+        undercount of a clinically significant finding, invisible in the
+        prose.
+
+        Canonicalising here fixes every downstream comparison at once
+        rather than teaching each call site to be case-insensitive, and it
+        keeps what the UI shows consistent with what the database holds.
+
+        Values outside the known list are still passed through unchanged
+        and still warn: the vocabularies are documentation, not a
+        constraint, and a genuinely new ClinVar term must not be silently
+        rewritten into something familiar.
+        """
+        canonical_pathogenicity = _canonicalise(
+            self.pathogenicity, _CANONICAL_PATHOGENICITY
+        )
+        if canonical_pathogenicity != self.pathogenicity:
+            _logger.info(
+                "variant.value_recased",
+                field="pathogenicity",
+                received=self.pathogenicity,
+                canonical=canonical_pathogenicity,
+            )
+            object.__setattr__(self, "pathogenicity", canonical_pathogenicity)
+
+        canonical_variant_type = _canonicalise(
+            self.variant_type, _CANONICAL_VARIANT_TYPE
+        )
+        if canonical_variant_type != self.variant_type:
+            _logger.info(
+                "variant.value_recased",
+                field="variant_type",
+                received=self.variant_type,
+                canonical=canonical_variant_type,
+            )
+            object.__setattr__(self, "variant_type", canonical_variant_type)
+
         if (
             self.pathogenicity is not None
             and self.pathogenicity not in KNOWN_PATHOGENICITY_VALUES
