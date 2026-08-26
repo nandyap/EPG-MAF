@@ -156,6 +156,7 @@ class FamilyHistorySpecialist(SpecialistBase[FamilyHistoryResultList]):
                 normalise_key_part(r.disease_name),
                 normalise_key_part(r.criteria_name),
             ),
+            tool_calls_seen=[c.tool_name for c in tool_calls],
         )
         return result_list
 

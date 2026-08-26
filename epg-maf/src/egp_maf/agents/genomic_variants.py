@@ -141,6 +141,7 @@ class GenomicVariantsSpecialist(SpecialistBase[GenomicVariantsResultList]):
                 ctx, patient_id
             ),
             key_of=lambda r: (normalise_key_part(r.variant_id),),
+            tool_calls_seen=[c.tool_name for c in tool_calls],
         )
         return result_list
 

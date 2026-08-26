@@ -135,6 +135,7 @@ class PGXSpecialist(SpecialistBase[PGXResultList]):
                 normalise_key_part(r.gene),
                 normalise_key_part(r.drug),
             ),
+            tool_calls_seen=[c.tool_name for c in tool_calls],
         )
         return result_list
 

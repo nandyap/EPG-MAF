@@ -31,10 +31,10 @@ implementation in :mod:`egp_maf.agents.llm_bridge`.
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import count
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -42,13 +42,20 @@ from agent_framework import FunctionTool
 from pydantic import BaseModel
 
 from egp_maf.errors import EgpError
+from egp_maf.logging import get_logger
 from egp_maf.state.clinician_context import ClinicianContext
 from egp_maf.state.provenance import DBProvenance
 from egp_maf.state.results.family_history import (  # noqa: F401 — used by subclasses
     FamilyHistoryResultList,
 )
 
-_logger = logging.getLogger(__name__)
+# structlog, not ``logging.getLogger``. The stdlib root handler is
+# configured with ``format="%(message)s"`` (logging/setup.py), so a
+# stdlib record's ``extra={...}`` is **dropped entirely** — the event name
+# prints and every field with it vanishes. Nothing errors; the log just
+# quietly says less than it appears to. structlog renders its kwargs, so
+# the fields below actually reach the log stream.
+_logger = get_logger(__name__)
 
 # ── Types shared by all specialists ─────────────────────────────────
 
@@ -292,25 +299,21 @@ class SpecialistBase(ABC, Generic[ResultListT]):
 
             _logger.info(
                 "specialist.run.completed",
-                extra={
-                    "specialist": self.name,
-                    "patient_id": inputs.patient_id,
-                    "duration_ms": int(
-                        (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
-                    ),
-                    "tool_call_count": len(react.tool_calls),
-                },
+                specialist=self.name,
+                patient_id=inputs.patient_id,
+                duration_ms=int(
+                    (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
+                ),
+                tool_call_count=len(react.tool_calls),
             )
             return slot_output
 
         except Exception as exc:  # noqa: BLE001 — must not raise out of a specialist
             _logger.exception(
                 "specialist.run.failed",
-                extra={
-                    "specialist": self.name,
-                    "patient_id": inputs.patient_id,
-                    "error_class": type(exc).__name__,
-                },
+                specialist=self.name,
+                patient_id=inputs.patient_id,
+                error_class=type(exc).__name__,
             )
             errors.append(f"{type(exc).__name__}: {exc}")
             return self.to_slot_output(None, status="failed", errors=errors)
@@ -453,21 +456,27 @@ def attach_provenance_to_results(
         ]
         _logger.warning(
             "provenance.results_unevidenced",
-            extra={
-                "unevidenced_count": len(unevidenced),
-                "result_count": len(results),
-                "eligible_tool_calls": eligible_calls,
-                "all_tool_calls": [c.tool_name for c in tool_calls],
-                # No eligible call at all means the agent answered without
-                # ever touching the tool that carries evidence — a
-                # different failure from a matcher that found no row.
-                "reason": (
-                    "no provenance-eligible tool was called"
-                    if not eligible_calls
-                    else "eligible tool ran but no row matched the result"
-                ),
-            },
+            unevidenced_count=len(unevidenced),
+            result_count=len(results),
+            eligible_tool_calls=eligible_calls,
+            all_tool_calls=[c.tool_name for c in tool_calls],
+            # No eligible call at all means the agent answered without
+            # ever touching the tool that carries evidence — a
+            # different failure from a matcher that found no row.
+            reason=(
+                "no provenance-eligible tool was called"
+                if not eligible_calls
+                else "eligible tool ran but no row matched the result"
+            ),
         )
+
+
+#: Monotonic per-process counter stamped on every backfill log line.
+#: Makes the flow readable in a log stream: how often the helper is
+#: entered, in what order, and how many of those entries actually had to
+#: query the repository. Resets per replica — it is a tracing aid, not a
+#: metric.
+_backfill_invocations = count(1)
 
 
 def normalise_key_part(value: Any) -> str:
@@ -490,6 +499,7 @@ async def backfill_provenance_from_repository(
     results: Sequence[Any],
     fetch_rows: Callable[[], Awaitable[Sequence[Any]]],
     key_of: Callable[[Any], tuple[str, ...]],
+    tool_calls_seen: Sequence[str] = (),
 ) -> None:
     """Evidence any result the ReAct pass left without provenance.
 
@@ -520,8 +530,34 @@ async def backfill_provenance_from_repository(
     Fail-soft. By this point the answer exists and only its evidence is
     missing, so a database failure must not turn a successful turn into a
     failed one — findings stay unevidenced and the UI says so plainly.
+
+    ``tool_calls_seen`` is logged, not used for matching. It is what makes
+    the entry line answer the question people actually ask of this helper:
+    *is it firing even when ``get_*`` did run?* Without it, a backfill log
+    line cannot be told apart from a genuine ReAct-path failure.
     """
+    invocation = next(_backfill_invocations)
     unevidenced = [r for r in results if not r.provenance]
+
+    # Emitted unconditionally, before the early return, so the log shows
+    # every entry — including the healthy ones that do nothing. A helper
+    # that only logs when it acts cannot be distinguished from one that is
+    # never called at all.
+    _logger.info(
+        "provenance.backfill.invoked",
+        invocation=invocation,
+        domain=domain,
+        patient_id=patient_id,
+        result_count=len(results),
+        unevidenced_count=len(unevidenced),
+        tool_calls=list(tool_calls_seen),
+        outcome=(
+            "skipped_all_evidenced"
+            if not unevidenced
+            else "querying_repository"
+        ),
+    )
+
     if not unevidenced:
         return
 
@@ -530,12 +566,11 @@ async def backfill_provenance_from_repository(
     except Exception as exc:  # noqa: BLE001 — see docstring
         _logger.warning(
             "provenance.backfill_failed",
-            extra={
-                "domain": domain,
-                "patient_id": patient_id,
-                "unevidenced_count": len(unevidenced),
-                "error": f"{exc.__class__.__name__}: {exc}",
-            },
+            invocation=invocation,
+            domain=domain,
+            patient_id=patient_id,
+            unevidenced_count=len(unevidenced),
+            error=f"{exc.__class__.__name__}: {exc}",
         )
         return
 
@@ -552,11 +587,12 @@ async def backfill_provenance_from_repository(
     still_unevidenced = sum(1 for r in results if not r.provenance)
     _logger.info(
         "provenance.backfilled",
-        extra={
-            "domain": domain,
-            "patient_id": patient_id,
-            "unevidenced_before": len(unevidenced),
-            "unevidenced_after": still_unevidenced,
-            "rows_available": len(by_key),
-        },
+        invocation=invocation,
+        domain=domain,
+        patient_id=patient_id,
+        unevidenced_before=len(unevidenced),
+        unevidenced_after=still_unevidenced,
+        rescued=len(unevidenced) - still_unevidenced,
+        rows_available=len(by_key),
+        tool_calls=list(tool_calls_seen),
     )

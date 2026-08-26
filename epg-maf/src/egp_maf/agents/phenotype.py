@@ -21,6 +21,8 @@ from egp_maf.agents.base import (
     SpecialistBase,
     ToolCall,
     attach_provenance_to_results,
+    backfill_provenance_from_repository,
+    normalise_key_part,
 )
 from egp_maf.agents.state_outputs import PhenotypeStateOutput
 from egp_maf.agents.tool_shims import build_phenotype_tools
@@ -115,6 +117,27 @@ class PhenotypeSpecialist(SpecialistBase[PhenotypeResultList]):
             tool_fields_derived=_TOOL_FIELDS_DERIVED,
             row_matches_result=_row_matches_result,
             provenance_builder=self._provenance_service.build,
+        )
+
+        # Phenotype has both failure modes the other domains have one of
+        # each. ``explore_patient_phenotype`` returns disease_name/term/
+        # code_type, which answers "what has this patient been diagnosed
+        # with?" outright, so the agent can skip get_patient_diagnoses.
+        # And the match key is ``disease_name`` — free text the LLM
+        # re-types, so ``==`` fails on any difference of case or spacing
+        # even when get_* did run.
+        #
+        # Note the grouped SQL aliases ``COALESCE(disease_name, term)`` to
+        # ``disease_name``, so a row with a null disease_name keys off its
+        # term. The unfiltered fetch below reproduces exactly that shape,
+        # which is why the keys line up.
+        await backfill_provenance_from_repository(
+            domain="phenotype",
+            patient_id=patient_id,
+            results=result_list.results,
+            fetch_rows=lambda: self._repo.get_patient_diagnoses(ctx, patient_id),
+            key_of=lambda r: (normalise_key_part(r.disease_name),),
+            tool_calls_seen=[c.tool_name for c in tool_calls],
         )
         return result_list
 
