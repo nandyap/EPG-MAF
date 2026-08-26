@@ -122,6 +122,16 @@ class MafSpecialistLlm(SpecialistLlm):
             )
 
         # Fallback: parse the string content as JSON (belt-and-braces).
+        #
+        # Note this validates into ``response_schema``, not ``wire_schema``,
+        # so the repository-owned fields the wire schema strips are
+        # accepted here if the model volunteers them — including
+        # ``interpretation_model``, the field that shipped as "manual" on
+        # 2026-08-26. Left as-is deliberately: ``wire_schema`` is
+        # ``extra='forbid'``, so routing this through it would turn one
+        # unexpected key into a failed turn, and this path exists to
+        # recover from a model whose output is already malformed.
+        # Reachable only when Structured Outputs did not parse at all.
         text = _extract_text_from_response(response)
         try:
             return request.response_schema.model_validate_json(text)  # type: ignore[attr-defined]

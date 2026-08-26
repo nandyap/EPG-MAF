@@ -52,7 +52,26 @@ from pydantic import BaseModel, ConfigDict, create_model
 # Both are also ``dict[str, Any]``, which strict mode cannot express — so
 # excluding them is what makes the schema valid as well as what makes it
 # correct.
-_EXCLUDED_FIELDS = frozenset({"provenance", "raw_annotations"})
+#
+# - ``interpretation_model`` / ``summary_model`` — these name *which model*
+#   wrote the neighbouring prose. Only the process knows that;
+#   ``SpecialistBase._attribute_model`` stamps it from settings. Leaving
+#   them in the schema let the model answer the question about itself, and
+#   it did: a family-history interpretation shipped labelled ``manual``
+#   (observed 2026-08-26), i.e. model-generated text presented as
+#   human-authored, inside the audit panel. ``_attribute_model`` could not
+#   correct it because it only writes when the field is still ``None``, so
+#   the model's answer won. Nothing failed — the attribution was simply
+#   false. Stripped here, the field arrives ``None`` and the process fills
+#   it in.
+_EXCLUDED_FIELDS = frozenset(
+    {
+        "provenance",
+        "raw_annotations",
+        "interpretation_model",
+        "summary_model",
+    }
+)
 
 # Cache: one derived model per source model, keyed by the class itself.
 _CACHE: dict[type[BaseModel], type[BaseModel]] = {}

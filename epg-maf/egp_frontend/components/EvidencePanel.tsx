@@ -140,11 +140,22 @@ function cellValue(value: unknown): string {
 // of the provenance record we are currently rendering. Showing those
 // back would both duplicate the panel and, worse, present LLM-derived
 // text as if it were retrieved data.
+//
+// The test for membership is narrow: the key must not be a column in ANY
+// domain's source table. `summary` and `risk_band` look LLM-ish and are
+// not listed, because pgx_annotations.summary and patient_prs.risk_band
+// are real columns — hiding them would silently remove genuine evidence,
+// which is the worse failure of the two.
 const NON_COLUMN_KEYS = new Set([
   "provenance",
   "interpretation",
   "interpretation_model",
   "summary_model",
+  // Phenotype only: the LLM's judgement of whether a diagnosis bears on
+  // the question asked. Not in the diagnoses SELECT, which returns
+  // disease_name, encounter_count, first/last_encounter_date, codes,
+  // terms, code_types. Observed rendering as a row on 2026-08-26.
+  "relevant_to_query",
 ]);
 
 function ProvenanceRecord({ p }: { p: Provenance }) {

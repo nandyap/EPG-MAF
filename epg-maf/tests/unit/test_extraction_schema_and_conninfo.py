@@ -30,8 +30,6 @@ reached a specialist.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
@@ -105,15 +103,39 @@ class TestStrictExtractionSchema:
         assert "provenance" not in properties
         assert "raw_annotations" not in properties
 
-    def test_clinical_fields_are_preserved(self) -> None:
-        """Stripping must not remove anything the LLM *should* fill."""
-        schema = strict_extraction_schema(
-            GenomicVariantsResultList
-        ).model_json_schema()
-        rendered = json.dumps(schema)
+    @pytest.mark.parametrize("model", _RESULT_LISTS, ids=lambda m: m.__name__)
+    def test_model_attribution_is_not_requested(self, model: type) -> None:
+        """The LLM must not name the model that wrote its own prose.
 
-        assert "interpretation" in rendered
-        assert "summary" in rendered
+        Observed 2026-08-26: a family-history interpretation shipped with
+        ``interpretation_model="manual"`` — model-generated text labelled
+        as human-authored, in the panel a clinician reads to check
+        provenance. ``_attribute_model`` only writes when the field is
+        still ``None``, so it could not correct it.
+
+        Nothing failed. The attribution was simply false, which is why
+        this needs a test rather than a comment.
+        """
+        schema = strict_extraction_schema(model).model_json_schema()
+        properties = _property_names(schema)
+
+        assert "interpretation_model" not in properties
+        assert "summary_model" not in properties
+
+    def test_clinical_fields_are_preserved(self) -> None:
+        """Stripping must not remove anything the LLM *should* fill.
+
+        Asserts on declared property names, not a substring of the
+        rendered JSON: ``"interpretation" in json.dumps(schema)`` also
+        matches ``interpretation_model`` and the word inside a docstring,
+        so it would keep passing after the real field was removed.
+        """
+        properties = _property_names(
+            strict_extraction_schema(GenomicVariantsResultList).model_json_schema()
+        )
+
+        assert "interpretation" in properties
+        assert "summary" in properties
 
     def test_nested_models_are_rewritten(self) -> None:
         """Optional nested models sit behind ``X | None``; a naive rewrite
