@@ -110,11 +110,22 @@ class PRSRepository(BaseRepository):
 
         conditions: list[str] = ["pp.patient_id = %s"]
         params: list[Any] = [patient_id]
+        # ILIKE for the same reason as every other repository: these
+        # values arrive from the LLM, which re-types them. ``prs_name =
+        # 'prs313_bc'`` matches nothing against a stored ``'PRS313_BC'``,
+        # the query succeeds with zero rows, and the specialist reports
+        # the patient has no such score.
+        #
+        # PRS is the only specialist with no provenance backfill — its
+        # ``explore`` returns no score or percentile, so ``get`` always
+        # runs and the unevidenced case does not arise. That also means
+        # nothing here catches a silent zero-row result, so the operator
+        # has to be right.
         if prs_name is not None:
-            conditions.append("pp.prs_name = %s")
+            conditions.append("pp.prs_name ILIKE %s")
             params.append(prs_name)
         if disease_name is not None:
-            conditions.append("pp.disease_name = %s")
+            conditions.append("pp.disease_name ILIKE %s")
             params.append(disease_name)
         where = " AND ".join(conditions)
 

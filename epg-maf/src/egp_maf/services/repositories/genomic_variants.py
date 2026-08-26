@@ -160,12 +160,9 @@ class GenomicVariantsRepository(BaseRepository):
         if variant_id is not None:
             conditions.append("pv.variant_id = %s")
             params.append(variant_id)
-        if disease_name is not None:
-            conditions.append("va.disease_name = %s")
-            params.append(disease_name)
-        # Gene symbols, variant types and pathogenicity classes are
-        # supplied by the LLM, which re-types them rather than passing
-        # through the exact string the database returned. ``=`` is
+        # Disease names, gene symbols, variant types and pathogenicity
+        # classes are supplied by the LLM, which re-types them rather than
+        # passing through the exact string the database returned. ``=`` is
         # therefore the wrong operator: ``pathogenicity = 'pathogenic'``
         # matches nothing, because the CHECK constraint stores
         # ``'Pathogenic'``. The query succeeds and returns zero rows, so
@@ -175,6 +172,13 @@ class GenomicVariantsRepository(BaseRepository):
         # ``ILIKE`` without wildcards is still an exact comparison, just
         # case-insensitive. ``search_variant_annotations`` already uses it
         # for the same field; this makes the two agree.
+        #
+        # ``variant_id`` above is deliberately left case-sensitive: it is
+        # an opaque identifier copied verbatim, and a case difference
+        # there would signal a genuinely different record.
+        if disease_name is not None:
+            conditions.append("va.disease_name ILIKE %s")
+            params.append(disease_name)
         if gene is not None:
             conditions.append("va.gene ILIKE %s")
             params.append(gene)

@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Generic, Protocol, TypeVar
 
 from agent_framework import FunctionTool
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from egp_maf.errors import EgpError
 from egp_maf.logging import get_logger
@@ -373,6 +373,38 @@ class SpecialistBase(ABC, Generic[ResultListT]):
 # ── Provenance helper (shared across domains) ────────────────────────
 
 
+def _repository_provenance(row: dict[str, Any]) -> DBProvenance | None:
+    """Return the repository's own provenance record carried by ``row``.
+
+    Every ``get_patient_*`` repository method builds a
+    :class:`DBProvenance` at query time from the genuine SQL row
+    (ADR-005) and attaches it to the result it returns. The tool shim then
+    serialises that whole result — provenance included — into the ReAct
+    tool output. So by the time a row reaches this module, the authentic
+    record is already inside it and can simply be read back out.
+
+    Reconstructing one instead produced a ``source_row`` that was **not a
+    database row**: it was the serialised result object, carrying
+    ``interpretation``, ``interpretation_model`` and a nested copy of this
+    very record, under a heading reading "Database row as retrieved".
+    ``6e1faed`` hid those keys at the display layer; this removes them at
+    the source.
+
+    Returns ``None`` when the row carries nothing usable, so the caller
+    falls back to constructing a record as before.
+    """
+    embedded = row.get("provenance")
+    if not isinstance(embedded, list) or not embedded:
+        return None
+    first = embedded[0]
+    if not isinstance(first, dict):
+        return None
+    try:
+        return DBProvenance.model_validate(first)
+    except ValidationError:
+        return None
+
+
 def attach_provenance_to_results(
     *,
     results: list[Any],
@@ -423,18 +455,26 @@ def attach_provenance_to_results(
                     continue
                 if not row_matches_result(row, result):
                     continue
-                kwargs: dict[str, Any] = dict(
-                    tool_name=call.tool_name,
-                    tool_parameters=dict(call.tool_parameters),
-                    source_table=tool_source_table[call.tool_name],
-                    source_row=dict(row),
-                    fields_derived=list(tool_fields_derived[call.tool_name]),
-                )
-                provenance = (
-                    provenance_builder(**kwargs)
-                    if provenance_builder is not None
-                    else DBProvenance(**kwargs)
-                )
+                # Prefer the record the repository built at query time —
+                # its ``source_row`` is the real SQL row, its
+                # ``tool_parameters`` are the ones actually used (the LLM's
+                # call omits ``patient_id``, which is bound in the shim),
+                # and its ``retrieved_at`` is the moment of the query
+                # rather than the moment of this loop.
+                provenance = _repository_provenance(row)
+                if provenance is None:
+                    kwargs: dict[str, Any] = dict(
+                        tool_name=call.tool_name,
+                        tool_parameters=dict(call.tool_parameters),
+                        source_table=tool_source_table[call.tool_name],
+                        source_row=dict(row),
+                        fields_derived=list(tool_fields_derived[call.tool_name]),
+                    )
+                    provenance = (
+                        provenance_builder(**kwargs)
+                        if provenance_builder is not None
+                        else DBProvenance(**kwargs)
+                    )
                 result.provenance.append(provenance)
                 seen_tools.add(call.tool_name)
                 break
