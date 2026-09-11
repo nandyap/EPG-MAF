@@ -26,6 +26,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from egp_maf.errors import DatabaseUnavailable
+from egp_maf.logging.flow_trace import preview, trace, trace_payload
 from egp_maf.infrastructure.db_pool import DbPoolFactory
 from egp_maf.services.authz import AuthzPolicy
 from egp_maf.services.provenance import ProvenanceService
@@ -55,7 +56,22 @@ class BaseRepository:
     # ── RBAC ────────────────────────────────────────────────────────
     def _authorize(self, ctx: ClinicianContext, patient_id: str) -> None:
         """Raise :class:`AccessDenied` if the clinician is not permitted."""
-        self._authz.enforce_read(ctx, patient_id)
+        try:
+            self._authz.enforce_read(ctx, patient_id)
+        except Exception as exc:
+            # Traced here because a denial raises *before* ``_fetch_all``,
+            # so ``db.query`` never fires and the tool appears simply to
+            # have returned nothing. That is precisely what happened in
+            # the 2026-08-24 golden-runner incident: every tool call was
+            # denied, and the specialist answered from the model's own
+            # knowledge instead.
+            trace(
+                "repo.authorize.denied",
+                clinician_id=ctx.clinician_id,
+                patient_id=patient_id,
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
+            raise
 
     # ── SQL execution ───────────────────────────────────────────────
     async def _fetch_all(
@@ -88,11 +104,38 @@ class BaseRepository:
                             dict(zip(columns, row, strict=True)) for row in rows
                         ]
                         safe_set_attribute(_span, "db.row_count", len(dict_rows))
+                        # Single choke point for every query in the system.
+                        # ``row_count`` here is the database's own answer to
+                        # "was there any data?", upstream of any tool,
+                        # matcher or model.
+                        trace(
+                            "db.query",
+                            table=table,
+                            row_count=len(dict_rows),
+                            param_count=len(params),
+                        )
+                        # Parameters carry patient ids and clinical filter
+                        # values, so the SQL text and bindings are payload
+                        # -gated rather than structural.
+                        trace_payload(
+                            "db.query.body",
+                            table=table,
+                            sql=preview(" ".join(sql.split()), 800),
+                            params=[preview(p, 120) for p in params],
+                            first_row=preview(dict_rows[0], 600)
+                            if dict_rows
+                            else None,
+                        )
                         return dict_rows
             except Exception as exc:
                 # Wrap any driver error as DatabaseUnavailable so callers can
                 # react with a stable HTTP status. Preserve the original exception
                 # via ``__cause__``. Span records the exception via db_span.
+                trace(
+                    "db.query.failed",
+                    table=table,
+                    error=f"{exc.__class__.__name__}: {exc}",
+                )
                 raise DatabaseUnavailable(
                     f"Query failed: {exc.__class__.__name__}"
                 ) from exc

@@ -43,6 +43,7 @@ from pydantic import BaseModel, ValidationError
 
 from egp_maf.errors import EgpError
 from egp_maf.logging import get_logger
+from egp_maf.logging.flow_trace import preview, trace, trace_payload
 from egp_maf.state.clinician_context import ClinicianContext
 from egp_maf.state.provenance import DBProvenance
 from egp_maf.state.results.family_history import (  # noqa: F401 — used by subclasses
@@ -249,12 +250,36 @@ class SpecialistBase(ABC, Generic[ResultListT]):
         started_at = datetime.now(timezone.utc)
         errors: list[str] = []
 
+        trace(
+            "specialist.step.start",
+            specialist=self.name,
+            patient_id=inputs.patient_id,
+            requested_diseases=inputs.requested_diseases,
+            query_chars=len(inputs.original_query or ""),
+        )
+
         try:
             # Steps 1–2: read inputs, build user message.
             user_message = self._build_user_message(inputs)
+            trace(
+                "specialist.step.1_2.user_message_built",
+                specialist=self.name,
+                chars=len(user_message),
+            )
+            trace_payload(
+                "specialist.step.1_2.user_message",
+                specialist=self.name,
+                user_message=preview(user_message),
+            )
 
             # Step 3: ReAct pass.
             tools = self.build_tools(ctx, inputs.patient_id)
+            trace(
+                "specialist.step.3.tools_bound",
+                specialist=self.name,
+                tool_count=len(tools),
+                tools=[getattr(t, "name", "?") for t in tools],
+            )
             react = await llm.run_react(
                 SpecialistReactRequest(
                     system_prompt=self._system_prompt,
@@ -264,6 +289,29 @@ class SpecialistBase(ABC, Generic[ResultListT]):
             )
 
             # Step 4: tool trace is already parsed by the LLM impl.
+            #
+            # ``total_rows`` is the single most diagnostic number in this
+            # method. Zero here with a non-empty result list at step 5
+            # means the findings were authored rather than retrieved —
+            # there was nothing to derive them from. Patient-scoped tools
+            # are counted separately because ``search_*`` reads the
+            # reference annotation tables and is not patient-filtered, so
+            # it can return rows for a patient that does not exist.
+            patient_scoped = [
+                c
+                for c in react.tool_calls
+                if c.tool_name.startswith(("get_patient_", "explore_patient_"))
+            ]
+            trace(
+                "specialist.step.4.tool_trace",
+                specialist=self.name,
+                patient_id=inputs.patient_id,
+                tool_call_count=len(react.tool_calls),
+                total_rows=sum(len(c.tool_output) for c in react.tool_calls),
+                patient_scoped_calls=[c.tool_name for c in patient_scoped],
+                patient_scoped_rows=sum(len(c.tool_output) for c in patient_scoped),
+                errored_calls=[c.tool_name for c in react.tool_calls if c.error],
+            )
 
             # Step 5: extraction pass.
             extracted = await llm.run_extraction(
@@ -275,6 +323,11 @@ class SpecialistBase(ABC, Generic[ResultListT]):
                     response_schema=self.response_schema,
                 )
             )
+            trace(
+                "specialist.step.5.extraction_done",
+                specialist=self.name,
+                result_count=len(getattr(extracted, "results", []) or []),
+            )
 
             # Step 6: provenance.
             extracted = await self.build_provenance(
@@ -283,18 +336,36 @@ class SpecialistBase(ABC, Generic[ResultListT]):
                 ctx=ctx,
                 patient_id=inputs.patient_id,
             )
+            _results = getattr(extracted, "results", []) or []
+            trace(
+                "specialist.step.6.provenance_attached",
+                specialist=self.name,
+                result_count=len(_results),
+                evidenced=sum(1 for r in _results if getattr(r, "provenance", None)),
+                unevidenced=sum(
+                    1 for r in _results if not getattr(r, "provenance", None)
+                ),
+            )
 
             # Step 7: model attribution — done here because it applies
             # uniformly to any result_list with ``interpretation_model``
             # / ``summary_model`` fields (all 5 domains have them).
             self._attribute_model(extracted)
+            trace("specialist.step.7.model_attributed", specialist=self.name)
 
             # Step 8: derived fields.
             extracted = self.apply_derived_fields(extracted, inputs.patient_id)
+            trace("specialist.step.8.derived_fields_applied", specialist=self.name)
 
             # Steps 9–10: domain-specific transform + wrap.
             slot_output = self.to_slot_output(
                 extracted, status="completed", errors=errors
+            )
+            trace(
+                "specialist.step.9_10.slot_built",
+                specialist=self.name,
+                status="completed",
+                slot_type=type(slot_output).__name__,
             )
 
             _logger.info(

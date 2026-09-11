@@ -62,6 +62,12 @@ param logAnalyticsWorkspaceId string = ''
 @secure()
 param authzAllowlistJson string = ''
 
+@description('Per-hop flow tracing. Structure only - step names, decisions, counts, tool names, row counts. No clinical content, safe to leave on.')
+param traceFlow bool = false
+
+@description('Log LLM prompts and replies IN FULL. THESE CONTAIN PHI. Diagnostic use only: enable, reproduce, read the logs, disable again. Ignored unless traceFlow is also true.')
+param tracePayloads bool = false
+
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: name
   location: location
@@ -123,6 +129,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'AUTH_STUB_ENABLED', value: string(authStubEnabled) }
             { name: 'ORCH_DISPATCH_MODE', value: orchDispatchMode }
             { name: 'EGP_AUTHZ_ALLOWLIST_PATH', value: '/mnt/authz/allowlist.json' }
+            { name: 'EGP_TRACE_FLOW', value: string(traceFlow) }
+            { name: 'EGP_TRACE_PAYLOADS', value: string(tracePayloads) }
           ]
           probes: [
             {

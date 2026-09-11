@@ -25,6 +25,7 @@ from typing import Any
 from agent_framework import Executor, WorkflowContext, handler
 from pydantic import BaseModel, ConfigDict
 
+from egp_maf.logging.flow_trace import trace
 from egp_maf.logging.setup import get_logger
 from egp_maf.workflow.decisions import SpecialistDispatchSet
 from egp_maf.workflow.state import (
@@ -72,6 +73,14 @@ class SpecialistDispatcherExecutor(Executor):
         message: SpecialistDispatch,
         ctx: WorkflowContext[SpecialistDispatch],
     ) -> None:
+        # Every dispatch traverses this one executor before the fan-out,
+        # so it is the cheapest place to see what was selected for this
+        # iteration as a single line.
+        trace(
+            "orch.dispatch.fanout",
+            specialists=list(getattr(message.decision, "specialists", []) or []),
+            patient_id=getattr(message.state, "patient_id", None),
+        )
         await ctx.send_message(message)
 
 

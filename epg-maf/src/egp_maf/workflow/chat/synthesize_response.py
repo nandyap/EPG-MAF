@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 from agent_framework import Executor, WorkflowContext, handler
 
+from egp_maf.logging.flow_trace import preview, trace, trace_payload
 from egp_maf.logging.setup import get_logger
 from egp_maf.workflow.state import ChatWorkflowState, SessionMessage
 
@@ -132,6 +133,21 @@ class SynthesizeResponseExecutor(Executor):
         ctx: WorkflowContext[None, ChatWorkflowState],
     ) -> None:
         clinical_context = _build_clinical_context(message)
+        # The exact text synthesis is allowed to speak from. When a reply
+        # asserts something the database does not support, this is the
+        # field that says whether the claim entered here or was invented
+        # downstream.
+        trace(
+            "synthesis.clinical_context_built",
+            thread_id=message.thread_id,
+            context_chars=len(clinical_context),
+            history_messages=len(message.messages),
+        )
+        trace_payload(
+            "synthesis.clinical_context",
+            thread_id=message.thread_id,
+            clinical_context=preview(clinical_context, 4000),
+        )
         reply_text = await self._synthesis_llm.synthesise(
             original_query=message.original_query,
             messages=list(message.messages),

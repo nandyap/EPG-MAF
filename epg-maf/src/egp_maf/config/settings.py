@@ -185,6 +185,20 @@ class Settings(BaseSettings):
         default=0.5, alias="LLM_RETRY_JITTER", ge=0.0, le=1.0
     )
 
+    # ── Flow tracing (diagnostic) ──────────────────────────────
+    # End-to-end per-hop logging. See :mod:`egp_maf.logging.flow_trace`.
+    #
+    # ``trace_flow`` is structure only — step names, decisions, counts,
+    # tool names, row counts. No clinical content; safe in dev and UAT.
+    #
+    # ``trace_payloads`` writes LLM prompts and replies IN FULL, which
+    # **contain PHI**. It exists to answer "what was the model actually
+    # shown?" during a targeted reproduction. It is ignored unless
+    # ``trace_flow`` is also true, so the PHI-bearing mode cannot be
+    # reached by setting a single variable.
+    trace_flow: bool = Field(default=False, alias="EGP_TRACE_FLOW")
+    trace_payloads: bool = Field(default=False, alias="EGP_TRACE_PAYLOADS")
+
     # ── Pydantic-settings config ───────────────────────────────────
     model_config = SettingsConfigDict(
         env_file=".env",

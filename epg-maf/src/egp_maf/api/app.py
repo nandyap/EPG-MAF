@@ -52,6 +52,14 @@ from egp_maf.errors import (
     ThreadPatientMismatch,
 )
 from egp_maf.logging.setup import get_logger
+from egp_maf.logging.flow_trace import (
+    bind_turn,
+    clear_turn,
+    new_turn_id,
+    preview,
+    trace,
+    trace_payload,
+)
 from egp_maf.resilience import format_error_response
 from egp_maf.state.clinician_context import ClinicianContext
 from egp_maf.state.session_document import SessionDocument
@@ -115,12 +123,42 @@ def create_app(container: Container) -> FastAPI:
         request: Request,
         authorization: str | None = Header(default=None),
     ) -> ChatResponseBody:
+        # Every log line for this turn carries the same ``turn_id``.
+        # A turn fans out to five specialists and makes 5+ LLM calls, so
+        # without a correlation key the interleaved lines from concurrent
+        # turns cannot be separated. ``merge_contextvars`` is already
+        # first in the structlog processor chain, so this needs no
+        # plumbing through call signatures.
+        bind_turn(
+            turn_id=new_turn_id(),
+            thread_id=body.thread_id,
+            patient_id=body.patient_id,
+        )
+        try:
+            return await _chat_turn(body, request, authorization)
+        finally:
+            # Container Apps reuses worker tasks; leaving these bound
+            # would stamp this turn's id onto the next one's lines.
+            clear_turn()
+
+    async def _chat_turn(
+        body: ChatRequestBody,
+        request: Request,
+        authorization: str | None = None,
+    ) -> ChatResponseBody:
         # Root span for the whole turn so every downstream span
         # inherits the trace id.
         with workflow_request_span(
             thread_id=body.thread_id,
             patient_id=body.patient_id,
         ):
+            trace(
+                "turn.start",
+                message_chars=len(body.message),
+                requested_diseases=body.requested_diseases,
+                requested_genes=body.requested_genes,
+            )
+            trace_payload("turn.start.body", message=preview(body.message))
             token = _extract_bearer(authorization)
             ctx = await container.authenticator.authenticate(
                 token, route="/chat"
@@ -154,6 +192,11 @@ def create_app(container: Container) -> FastAPI:
             if scope_decision.is_refusal():
                 # Emit both a structured log line and a real audit event
                 # (B-006 sink deferred; the shape is stable).
+                trace(
+                    "turn.end",
+                    outcome="scope_refusal",
+                    reason=scope_decision.reason,
+                )
                 _logger.warning(
                     "scope.guard.refused",
                     thread_id=body.thread_id,
@@ -210,10 +253,35 @@ def create_app(container: Container) -> FastAPI:
                 **_slots_from(thread_doc),
             )
 
+            trace(
+                "turn.workflow.start",
+                history_messages=len(initial.messages),
+                agents_completed=list(initial.agents_completed),
+            )
             result = await container.workflow_runtime.run_turn(initial)
             final = _extract_final_state(result)
 
             trace_id, _span_id = get_current_trace_and_span_ids()
+
+            _final_slots = getattr(final, "specialist_slots", None) or {}
+            trace(
+                "turn.end",
+                outcome="completed",
+                agents_completed=list(getattr(final, "agents_completed", []) or []),
+                slot_statuses={
+                    name: getattr(slot, "status", None)
+                    for name, slot in (
+                        _final_slots.items()
+                        if hasattr(_final_slots, "items")
+                        else []
+                    )
+                },
+                reply_chars=len(getattr(final, "final_response", "") or ""),
+            )
+            trace_payload(
+                "turn.end.body",
+                reply=preview(getattr(final, "final_response", "") or ""),
+            )
 
             # Slice 5 (B-009): persist the user + assistant messages
             # back onto the thread so ``GET /threads/{id}`` returns the

@@ -33,6 +33,7 @@ from egp_maf.infrastructure.compass_client import LlmClientFactory
 from egp_maf.infrastructure.cosmos_client import CosmosClientFactory
 from egp_maf.infrastructure.db_pool import DbPoolFactory
 from egp_maf.logging.setup import configure_logging, get_logger
+from egp_maf.logging.flow_trace import configure_flow_trace
 from egp_maf.security.scope_guard import ScopeGuard, build_scope_guard_from_settings
 from egp_maf.services.authz import AllowlistAuthzPolicy, AuthzPolicy
 from egp_maf.services.prompt_service import PromptService
@@ -319,6 +320,12 @@ def build_container(
         orch_router=type(resolved_orch_router).__name__,
         synthesis=type(resolved_synthesis).__name__,
     )
+
+    # Read the tracing flags once, here, so the per-hop trace calls are a
+    # module-level boolean check rather than a settings lookup. Emits a
+    # loud warning when payload tracing is on, because that mode writes
+    # PHI to the log stream.
+    configure_flow_trace(settings)
 
     # Specialists (W05). Each is bound to the shared Repository +
     # ProvenanceService and to a MAF-backed :class:`SpecialistLlm`.

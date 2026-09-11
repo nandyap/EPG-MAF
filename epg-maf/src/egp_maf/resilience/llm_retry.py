@@ -43,6 +43,7 @@ from egp_maf.errors import (
     RateLimitExceeded,
     UpstreamTimeout,
 )
+from egp_maf.logging.flow_trace import trace
 from egp_maf.resilience.retry import RetryPolicy, retry_async
 from egp_maf.telemetry.metrics import MetricEmitter, NullMetricEmitter
 
@@ -154,23 +155,36 @@ class RetryingSpecialistLlm:
     async def run_react(
         self, request: SpecialistReactRequest
     ) -> SpecialistReactResult:
-        return await self._retry(self._inner.run_react, request)
+        return await self._retry(self._inner.run_react, request, phase="react")
 
     async def run_extraction(
         self, request: SpecialistExtractionRequest[Any]
     ) -> Any:
-        return await self._retry(self._inner.run_extraction, request)
+        return await self._retry(
+            self._inner.run_extraction, request, phase="extraction"
+        )
 
-    async def _retry(self, fn: Any, request: Any) -> Any:
+    async def _retry(self, fn: Any, request: Any, *, phase: str = "?") -> Any:
         try:
-            return await retry_async(self._policy, self._observed(fn), request)
+            return await retry_async(
+                self._policy, self._observed(fn, phase=phase), request
+            )
         except BaseException as exc:
+            # Terminal: every attempt was spent. Without this the caller
+            # sees one failure and no sign that N HTTP calls were made,
+            # which makes a slow turn impossible to explain from logs.
+            trace(
+                "llm.retry.exhausted",
+                phase=phase,
+                upstream=self._upstream,
+                error=f"{exc.__class__.__name__}: {exc}",
+            )
             typed = classify_llm_exception(exc)
             if isinstance(typed, EgpError) and typed is not exc:
                 raise typed from exc
             raise
 
-    def _observed(self, fn: Any) -> Any:
+    def _observed(self, fn: Any, *, phase: str = "?") -> Any:
         """Wrap ``fn`` so every observed 429 emits a rate-limit metric.
 
         We increment BEFORE re-raising so retry accounting captures the
@@ -185,6 +199,17 @@ class RetryingSpecialistLlm:
                 typed = classify_llm_exception(exc)
                 if isinstance(typed, RateLimitExceeded):
                     self._metrics.emit_rate_limit_hit(upstream=self._upstream)
+                # One line per failed attempt. A retried specialist makes
+                # up to ``llm_retry_max_attempts`` real HTTP calls, and
+                # until now none of them were visible.
+                trace(
+                    "llm.retry.attempt_failed",
+                    phase=phase,
+                    upstream=self._upstream,
+                    error_class=exc.__class__.__name__,
+                    classified_as=type(typed).__name__,
+                    retryable=_is_retryable(exc),
+                )
                 raise
 
         return _observe

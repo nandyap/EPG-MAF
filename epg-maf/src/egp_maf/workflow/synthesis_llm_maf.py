@@ -15,15 +15,25 @@ the workflow package.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from agent_framework import ChatOptions, Content, Message
 from agent_framework.openai import OpenAIChatClient
 
+from egp_maf.logging import get_logger
+from egp_maf.logging.flow_trace import (
+    preview,
+    summarise_messages,
+    trace,
+    trace_payload,
+)
 from egp_maf.telemetry import llm_span
 
-_logger = logging.getLogger(__name__)
+# structlog, not ``logging.getLogger``: ``extra={}`` on the stdlib logger
+# is dropped by the ``format="%(message)s"`` root handler (§4e). The
+# existing ``synthesis_llm.empty_response`` below had been losing its
+# ``model`` field since it was written.
+_logger = get_logger(__name__)
 
 # Roles we forward to the model. ``system`` is supplied by the prompt and
 # ``tool`` messages belong to the specialist ReAct loops, not to synthesis.
@@ -100,6 +110,28 @@ class MafSynthesisLlm:
             )
         )
 
+        # ``clinical_context_chars`` is the field to read when a reply
+        # states something the database does not support. Synthesis can
+        # only blend what it is given; a near-empty context with a
+        # confident clinical reply means the content arrived from a
+        # specialist slot, not from here.
+        trace(
+            "llm.synthesis.request",
+            model=self._model_label,
+            history_messages=len(history),
+            total_messages=len(chat_messages),
+            message_shape=summarise_messages(chat_messages),
+            clinical_context_chars=len(clinical_context),
+            query_chars=len(original_query),
+        )
+        trace_payload(
+            "llm.synthesis.request.body",
+            model=self._model_label,
+            system_prompt=preview(self._system_prompt),
+            clinical_context=preview(clinical_context),
+            original_query=preview(original_query, 500),
+        )
+
         with llm_span(model=self._model_label, phase="synthesis"):
             response = await self._client.get_response(
                 chat_messages,
@@ -107,11 +139,22 @@ class MafSynthesisLlm:
             )
 
         reply = _response_text(response)
+        trace(
+            "llm.synthesis.response",
+            model=self._model_label,
+            reply_chars=len(reply),
+            empty=not reply,
+        )
+        trace_payload(
+            "llm.synthesis.response.body",
+            model=self._model_label,
+            reply=preview(reply),
+        )
         if not reply:
             # Never return an empty bubble to the clinician.
             _logger.warning(
                 "synthesis_llm.empty_response",
-                extra={"model": self._model_label},
+                model=self._model_label,
             )
             return (
                 "I was unable to generate a response for that question. "

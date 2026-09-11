@@ -21,7 +21,6 @@ unit tests use.
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,9 +35,19 @@ from egp_maf.agents.base import (
     ToolCall,
 )
 from egp_maf.agents.extraction_schema import strict_extraction_schema
+from egp_maf.logging import get_logger
+from egp_maf.logging.flow_trace import (
+    preview,
+    summarise_messages,
+    trace,
+    trace_payload,
+)
 from egp_maf.telemetry import llm_span
 
-_logger = logging.getLogger(__name__)
+# structlog, not ``logging.getLogger``: the root handler is configured
+# with ``format="%(message)s"``, so a stdlib record's ``extra={}`` is
+# dropped and only the event name survives (§4e).
+_logger = get_logger(__name__)
 
 
 def _text_msg(role: str, text: str) -> Message:
@@ -74,6 +83,22 @@ class MafSpecialistLlm(SpecialistLlm):
             instructions=request.system_prompt,
             tools=request.tools,
         )
+
+        trace(
+            "llm.react.request",
+            agent=self._agent_id,
+            tool_count=len(request.tools),
+            tools=[getattr(t, "name", "?") for t in request.tools],
+            system_prompt_chars=len(request.system_prompt),
+            user_message_chars=len(request.user_message),
+        )
+        trace_payload(
+            "llm.react.request.body",
+            agent=self._agent_id,
+            system_prompt=preview(request.system_prompt),
+            user_message=preview(request.user_message),
+        )
+
         # W08: one span per LLM call. ``model`` name comes from the
         # ``agent_id`` (which encodes the specialist name in this bridge).
         with llm_span(model=self._agent_id, phase="react"):
@@ -83,6 +108,43 @@ class MafSpecialistLlm(SpecialistLlm):
             )
         tool_calls = _extract_tool_calls_from_response(response)
         transcript = _flatten_transcript(response)
+
+        # The tool trace is the ground truth for "did anything come back
+        # from Postgres?". ``rows`` per call is what separates a genuine
+        # empty result from a fabricated finding: results produced
+        # alongside an all-zero trace cannot have come from the database.
+        trace(
+            "llm.react.response",
+            agent=self._agent_id,
+            tool_call_count=len(tool_calls),
+            tool_calls=[
+                {
+                    "tool": c.tool_name,
+                    "rows": len(c.tool_output),
+                    "error": c.error,
+                }
+                for c in tool_calls
+            ],
+            total_rows=sum(len(c.tool_output) for c in tool_calls),
+            transcript_messages=len(transcript),
+            transcript_chars=sum(len(m.get("content", "")) for m in transcript),
+        )
+        trace_payload(
+            "llm.react.response.body",
+            agent=self._agent_id,
+            transcript=[
+                {"role": m.get("role"), "content": preview(m.get("content"))}
+                for m in transcript
+            ],
+            tool_parameters=[
+                {"tool": c.tool_name, "params": c.tool_parameters} for c in tool_calls
+            ],
+            first_rows=[
+                {"tool": c.tool_name, "row": preview(c.tool_output[0], 600)}
+                for c in tool_calls
+                if c.tool_output
+            ],
+        )
         return SpecialistReactResult(transcript=transcript, tool_calls=tool_calls)
 
     async def run_extraction(
@@ -102,6 +164,36 @@ class MafSpecialistLlm(SpecialistLlm):
         # real schema. See :mod:`egp_maf.agents.extraction_schema`.
         wire_schema = strict_extraction_schema(request.response_schema)
 
+        # ``transcript`` here is ``_flatten_transcript`` output, which
+        # keeps only ``type='text'`` content — **the tool result rows are
+        # elided**. So this pass is asked to "populate the result list
+        # from the tool results above" while being shown the ReAct model's
+        # prose *about* the rows rather than the rows themselves.
+        #
+        # ``transcript_chars`` is the number to read first. A small value
+        # with a non-empty result means the schema was filled from
+        # something other than retrieved data.
+        transcript_chars = sum(len(m.get("content", "")) for m in request.transcript)
+        trace(
+            "llm.extraction.request",
+            agent=self._agent_id,
+            schema=request.response_schema.__name__,
+            wire_schema=wire_schema.__name__,
+            transcript_messages=len(request.transcript),
+            transcript_chars=transcript_chars,
+            transcript_shape=summarise_messages(request.transcript),
+            instruction_chars=len(request.extraction_instruction),
+        )
+        trace_payload(
+            "llm.extraction.request.body",
+            agent=self._agent_id,
+            transcript=[
+                {"role": m.get("role"), "content": preview(m.get("content"))}
+                for m in request.transcript
+            ],
+            instruction=preview(request.extraction_instruction),
+        )
+
         with llm_span(
             model=self._agent_id, phase="extract", structured_output=True
         ):
@@ -117,9 +209,11 @@ class MafSpecialistLlm(SpecialistLlm):
         # parsed model instance when ``response_format`` is a BaseModel.
         parsed = getattr(response, "value", None)
         if parsed is not None:
-            return request.response_schema.model_validate(  # type: ignore[attr-defined]
+            result = request.response_schema.model_validate(  # type: ignore[attr-defined]
                 parsed.model_dump()
             )
+            _trace_extraction_result(self._agent_id, result, path="structured_output")
+            return result
 
         # Fallback: parse the string content as JSON (belt-and-braces).
         #
@@ -134,13 +228,45 @@ class MafSpecialistLlm(SpecialistLlm):
         # Reachable only when Structured Outputs did not parse at all.
         text = _extract_text_from_response(response)
         try:
-            return request.response_schema.model_validate_json(text)  # type: ignore[attr-defined]
+            result = request.response_schema.model_validate_json(text)  # type: ignore[attr-defined]
         except Exception as exc:
             _logger.warning(
                 "specialist_llm.extraction_parse_fallback_failed",
-                extra={"agent_id": self._agent_id, "error": str(exc)},
+                agent_id=self._agent_id,
+                error=str(exc),
             )
             raise
+        _trace_extraction_result(self._agent_id, result, path="json_fallback")
+        return result
+
+
+def _trace_extraction_result(agent_id: str, result: Any, *, path: str) -> None:
+    """Log what the extraction pass produced.
+
+    Read together with ``llm.react.response``: ``result_count`` here
+    against ``total_rows`` there is the fabrication test. Non-zero
+    results from zero rows means the content was authored, not
+    retrieved — there was no input to derive it from.
+    """
+    results = getattr(result, "results", None)
+    summary = getattr(result, "summary", None)
+    trace(
+        "llm.extraction.response",
+        agent=agent_id,
+        path=path,
+        schema=type(result).__name__,
+        result_count=len(results) if isinstance(results, list) else None,
+        has_summary=summary is not None,
+    )
+    trace_payload(
+        "llm.extraction.response.body",
+        agent=agent_id,
+        summary=preview(summary, 800),
+        results=[
+            preview(r.model_dump() if hasattr(r, "model_dump") else r, 600)
+            for r in (results if isinstance(results, list) else [])
+        ],
+    )
 
 
 def _extract_tool_calls_from_response(response: Any) -> list[ToolCall]:

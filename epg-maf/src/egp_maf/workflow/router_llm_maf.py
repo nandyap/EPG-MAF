@@ -10,19 +10,22 @@ they're consumed by the workflow layer, not by any specialist.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from agent_framework import ChatOptions, Content, Message
 from agent_framework.openai import OpenAIChatClient
 
+from egp_maf.logging import get_logger
+from egp_maf.logging.flow_trace import preview, trace, trace_payload
 from egp_maf.telemetry import llm_span
 from egp_maf.workflow.decisions import (
     ChatRouterDecision,
     SpecialistDispatchSet,
 )
 
-_logger = logging.getLogger(__name__)
+# structlog, not ``logging.getLogger`` — see §4e. This module had no call
+# sites, so nothing was lost, but the tracing added below would have been.
+_logger = get_logger(__name__)
 
 
 def _msg(role: str, text: str) -> Message:
@@ -77,6 +80,17 @@ class MafChatRouterLlm:
             "Decide whether the current message requires fresh clinical "
             "data. Respond via the ChatRouterDecision schema."
         )
+        trace(
+            "llm.chat_router.request",
+            agents_completed=agents_completed,
+            cached_domains=cached_domains,
+            query_chars=len(original_query),
+        )
+        trace_payload(
+            "llm.chat_router.request.body",
+            system_prompt=preview(self._system_prompt),
+            user_message=preview(user_msg),
+        )
         with llm_span(
             model="chat_router", phase="route", structured_output=True
         ):
@@ -87,7 +101,12 @@ class MafChatRouterLlm:
                     response_format=ChatRouterDecision,
                 ),
             )
-        return _parse_decision(response, ChatRouterDecision)
+        decision = _parse_decision(response, ChatRouterDecision)
+        trace(
+            "llm.chat_router.response",
+            decision=decision.model_dump(),
+        )
+        return decision
 
 class MafOrchRouterLlm:
     """Real MAF-backed :class:`OrchRouterLlm` for the orchestration
@@ -120,6 +139,17 @@ class MafOrchRouterLlm:
             "specialists list to end the orchestration. Respond via the "
             "SpecialistDispatchSet schema."
         )
+        trace(
+            "llm.orch_router.request",
+            agents_completed=agents_completed,
+            requested_diseases=requested_diseases,
+            query_chars=len(original_query),
+        )
+        trace_payload(
+            "llm.orch_router.request.body",
+            system_prompt=preview(self._system_prompt),
+            user_message=preview(user_msg),
+        )
         with llm_span(
             model="orch_router", phase="route", structured_output=True
         ):
@@ -130,4 +160,9 @@ class MafOrchRouterLlm:
                     response_format=SpecialistDispatchSet,
                 ),
             )
-        return _parse_decision(response, SpecialistDispatchSet)
+        decision = _parse_decision(response, SpecialistDispatchSet)
+        trace(
+            "llm.orch_router.response",
+            decision=decision.model_dump(),
+        )
+        return decision

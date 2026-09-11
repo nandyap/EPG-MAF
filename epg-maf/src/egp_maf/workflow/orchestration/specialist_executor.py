@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from agent_framework import Executor, WorkflowContext, handler
 
 from egp_maf.agents.base import SpecialistBase, SpecialistInputs, SpecialistLlm
+from egp_maf.logging.flow_trace import trace
 from egp_maf.logging.setup import get_logger
 from egp_maf.telemetry import specialist_span
 from egp_maf.telemetry.metrics import MetricEmitter, NullMetricEmitter
@@ -70,7 +71,10 @@ class SpecialistExecutor(Executor):
     ) -> None:
         if self._name not in message.decision.specialists:
             # Not selected — forward state unchanged so the fan-in
-            # barrier completes.
+            # barrier completes. Traced at debug volume because all five
+            # executors receive every dispatch: four of these per
+            # iteration is normal, and their absence is the anomaly.
+            trace("specialist.not_selected", specialist=self._name)
             await ctx.send_message(message.state)
             return
 
@@ -91,6 +95,12 @@ class SpecialistExecutor(Executor):
         # specialist can't take down the whole orchestration.
         slot: SpecialistSlot
         try:
+            trace(
+                "specialist.invoking",
+                specialist=self._name,
+                patient_id=inputs.patient_id,
+                requested_diseases=inputs.requested_diseases,
+            )
             with specialist_span(
                 self._name, patient_id=inputs.patient_id
             ) as _:
