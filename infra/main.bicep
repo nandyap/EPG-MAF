@@ -110,6 +110,12 @@ param postgresStartupRequired bool = true
 @secure()
 param authzAllowlistJson string = ''
 
+@description('Per-hop flow tracing. Structure only - no clinical content. Safe to leave on.')
+param traceFlow bool = false
+
+@description('Log LLM prompts and replies IN FULL. THESE CONTAIN PHI. Diagnostic use only. Ignored unless traceFlow is also true.')
+param tracePayloads bool = false
+
 // ── Derived names ──────────────────────────────────────────────────
 var uamiName        = '${projectPrefix}-${env}-uami'
 var backendAppName  = '${projectPrefix}-${env}-backend'
@@ -189,6 +195,8 @@ module backend 'modules/containerapp-backend.bicep' = {
     postgresStartupRequired: postgresStartupRequired
     logAnalyticsWorkspaceId: logAnalyticsWorkspaceId
     authzAllowlistJson: authzAllowlistJson
+    traceFlow: traceFlow
+    tracePayloads: tracePayloads
   }
   dependsOn: [ rbac, cosmosContainers ]
 }

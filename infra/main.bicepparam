@@ -85,3 +85,13 @@ param authzAllowlistJson = readEnvironmentVariable(
   'AZURE_AUTHZ_ALLOWLIST_JSON',
   '{"version":1,"clinicians":{"demo":["HG00096","HG00097","HG04001","HG04004","PGP001","NA12878"]},"admins":["demo"]}'
 )
+
+// Flow tracing. Env-overridable so a diagnostic session does not need a
+// code change, and so a bicep re-apply does not silently reset a flag
+// that was set with `az containerapp update`.
+//
+// EGP_TRACE_PAYLOADS writes LLM prompts and replies IN FULL and they
+// CONTAIN PHI. Leave false; enable only for a targeted reproduction,
+// then disable and treat the captured logs as PHI.
+param traceFlow = bool(readEnvironmentVariable('AZURE_TRACE_FLOW', 'false'))
+param tracePayloads = bool(readEnvironmentVariable('AZURE_TRACE_PAYLOADS', 'false'))
