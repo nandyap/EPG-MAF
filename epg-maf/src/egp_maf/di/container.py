@@ -42,6 +42,7 @@ from egp_maf.services.repositories import (
     FamilyHistoryRepository,
     GenomicVariantsRepository,
     PGXRepository,
+    PatientRepository,
     PhenotypeRepository,
     PRSRepository,
 )
@@ -98,6 +99,7 @@ class Container:
         specialist_registry: SpecialistRegistry,
         workflow_runtime: WorkflowRuntime,
         scope_guard: ScopeGuard | None = None,
+        patient_repository: "PatientRepository | None" = None,
     ) -> None:
         self.settings = settings
         self.db_pool_factory = db_pool_factory
@@ -118,6 +120,12 @@ class Container:
         # ``build_container`` always populates it; the API layer's
         # scope check gracefully allows-through when the guard is None.
         self.scope_guard = scope_guard or ScopeGuard()
+        # Optional for the same reason, and ``build_container`` always
+        # populates it. When it is ``None`` the ``POST /threads``
+        # existence check cannot run, so the endpoint logs a warning
+        # rather than skipping silently — an unconfigured safety check
+        # that says nothing is how this class of bug survives.
+        self.patient_repository = patient_repository
 
         self._started: bool = False
 
@@ -357,6 +365,13 @@ def build_container(
         authz=authz_policy,
         provenance=provenance_service,
     )
+    # Not bound to any specialist — used only by ``POST /threads`` to
+    # reject a patient id that does not exist before a thread is opened.
+    patient_repo = PatientRepository(
+        pool_factory=db_pool_factory,
+        authz=authz_policy,
+        provenance=provenance_service,
+    )
     specialist_registry = build_specialist_registry(
         prs_repo=prs_repo,
         genomic_variants_repo=genomic_variants_repo,
@@ -397,4 +412,5 @@ def build_container(
         scope_guard=build_scope_guard_from_settings(
             resolved_settings.scope_guard_id_patterns
         ),
+        patient_repository=patient_repo,
     )

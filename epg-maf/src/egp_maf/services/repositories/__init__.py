@@ -15,6 +15,7 @@ Design references:
 from egp_maf.services.repositories.base import BaseRepository
 from egp_maf.services.repositories.family_history import FamilyHistoryRepository
 from egp_maf.services.repositories.genomic_variants import GenomicVariantsRepository
+from egp_maf.services.repositories.patients import PatientRepository
 from egp_maf.services.repositories.pgx import PGXRepository
 from egp_maf.services.repositories.phenotype import PhenotypeRepository
 from egp_maf.services.repositories.prs import PRSRepository
@@ -25,5 +26,6 @@ __all__ = [
     "GenomicVariantsRepository",
     "PGXRepository",
     "PRSRepository",
+    "PatientRepository",
     "PhenotypeRepository",
 ]

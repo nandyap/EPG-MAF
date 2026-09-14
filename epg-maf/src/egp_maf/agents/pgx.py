@@ -37,6 +37,55 @@ from egp_maf.state.results.pgx import PGXDrugResult, PGXResultList
 
 _logger = logging.getLogger(__name__)
 
+# Clinical actionability order for ``phenotype`` (customer request,
+# 2026-09-14, patient HG04012).
+#
+# Keys are ``casefold``ed because ``phenotype`` is re-typed by the
+# extraction pass rather than copied from the row, so "Poor metabolizer"
+# and "POOR METABOLIZER" both arrive in practice. Exact matching here
+# would silently sort an actionable finding to the bottom — the §4d
+# class of bug, in a field where the consequence is a buried
+# prescribing change.
+#
+# The ordering is a clinical judgement and should be put to M42 if they
+# disagree with it:
+#   Poor          — drug not metabolised (clopidogrel not activated)
+#   Rapid         — toxicity risk (codeine → morphine accumulation)
+#   Intermediate  — usually a dose adjustment (simvastatin myopathy)
+#   Unknown       — cannot advise; may warrant repeat testing
+#   Normal        — no action indicated, so last
+_PHENOTYPE_RANK: dict[str, int] = {
+    "poor metabolizer": 0,
+    "rapid metabolizer": 1,
+    "ultrarapid metabolizer": 1,
+    "ultra-rapid metabolizer": 1,
+    "intermediate metabolizer": 2,
+    "unknown": 3,
+    "normal metabolizer": 4,
+}
+#: Anything outside the vocabulary sorts with "unknown": not a
+#: known-actionable finding, but not a clean "no action indicated"
+#: either, so it must not be presented as reassuringly as one.
+_PHENOTYPE_RANK_DEFAULT = 3
+
+
+def _actionability_rank(result: PGXDrugResult) -> tuple[int, int]:
+    """Sort key: most clinically actionable first.
+
+    The secondary key puts a row carrying a prescribing recommendation
+    above one that does not, within the same phenotype — the other half
+    of the customer's request ("the metabolizer status **and the drug
+    recommendation** prior to others"). The LEFT JOIN yields
+    ``recommendation=None`` where no annotation matched, and those are
+    the rows with nothing to act on.
+    """
+    phenotype = (result.phenotype or "").strip().casefold()
+    return (
+        _PHENOTYPE_RANK.get(phenotype, _PHENOTYPE_RANK_DEFAULT),
+        0 if result.recommendation else 1,
+    )
+
+
 _TOOL_SOURCE_TABLE: dict[str, str] = {
     "get_patient_pgx": "patient_pgx_status LEFT JOIN pgx_annotations",
 }
@@ -153,7 +202,11 @@ class PGXSpecialist(SpecialistBase[PGXResultList]):
     ) -> PGXResultList:
         """Prototype parity: derive ``patient_id``, ``genes_assessed``,
         ``drugs_with_recommendations`` programmatically — LLM never fills
-        these."""
+        these.
+
+        Additionally orders results by clinical actionability (customer
+        request, 2026-09-14). See :func:`_actionability_rank`.
+        """
         result_list.patient_id = patient_id
         result_list.genes_assessed = sorted({r.gene for r in result_list.results if r.gene})
         result_list.drugs_with_recommendations = sorted(
@@ -162,6 +215,27 @@ class PGXSpecialist(SpecialistBase[PGXResultList]):
                 for r in result_list.results
                 if r.drug and r.recommendation is not None
             }
+        )
+        # Deliberate deviation from prototype row order.
+        #
+        # The customer's report (patient HG04012): "The presentation of
+        # the PGx results needs to be changed to have the metabolizer
+        # status and the drug recommendation prior to others." A
+        # clinician scanning a PGx panel needs the gene that changes
+        # prescribing first; six Normal Metabolizer rows above the one
+        # Poor Metabolizer buries the only finding that matters.
+        #
+        # Done here, in Python, rather than by asking the synthesis
+        # prompt to "lead with the non-normal finding". Ordering is a
+        # deterministic property of the data and does not need a model's
+        # cooperation — the recurring lesson of 7ca173e, b6b479a and
+        # 3c7a854. The ordering flows into the slot, so the synthesis
+        # context, the specialist card and the evidence panel all agree.
+        #
+        # ``sorted`` is stable, so rows of equal rank keep the order the
+        # repository returned them in.
+        result_list.results = sorted(
+            result_list.results, key=_actionability_rank
         )
         return result_list
 

@@ -347,11 +347,45 @@ def create_app(container: Container) -> FastAPI:
                 f"Patient {body.patient_id} is not available for this session."
             )
 
-        # Existence check would go here once a patient repository is wired.
-        # For now the allowlist doubles as the existence check — a
-        # patient a clinician isn't allow-listed for is indistinguishable
-        # from a non-existent patient from the caller's perspective,
-        # which is the exact enumeration-defence property we want.
+        # Existence check.
+        #
+        # The comment that used to sit here said the allowlist doubled as
+        # this check, which is true for an ordinary clinician — unlisted
+        # and non-existent both 404, the enumeration defence B-005 asked
+        # for. It is NOT true for an admin: ``_Allowlist.can_read``
+        # returns True before any per-patient check, so for ``demo`` the
+        # allowlist stopped doubling as anything and this check was
+        # simply absent. A customer typed HG0007 for HG04007 on
+        # 2026-09-10, got a thread, and the assistant answered with three
+        # fabricated variants.
+        #
+        # Same ``PatientUnavailable`` 404 and identical body as the
+        # allowlist branch above, so the two remain indistinguishable
+        # from outside. The real reason is logged.
+        #
+        # ``DatabaseUnavailable`` is deliberately NOT caught. A database
+        # we cannot reach tells us nothing about whether the patient
+        # exists, and answering "patient not available" would turn a
+        # retrieval failure into a factual claim — the same
+        # absence-of-evidence error as reporting an errored query as "no
+        # findings". It propagates as a 503 and the clinician is told to
+        # try again.
+        if container.patient_repository is None:
+            _logger.warning(
+                "threads.create.existence_check_skipped",
+                patient_id=body.patient_id,
+                reason="no patient_repository configured on the container",
+            )
+        elif not await container.patient_repository.exists(ctx, body.patient_id):
+            _logger.warning(
+                "threads.create.patient_not_found",
+                clinician_id=ctx.clinician_id,
+                patient_id=body.patient_id,
+                reason="patient_not_found",
+            )
+            raise PatientUnavailable(
+                f"Patient {body.patient_id} is not available for this session."
+            )
 
         thread = await container.thread_state_provider.create_thread(
             clinician_id=ctx.clinician_id,
