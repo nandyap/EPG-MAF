@@ -87,10 +87,17 @@ class PGXSpecialist(SpecialistBase[PGXResultList]):
         return build_pgx_tools(self._repo, ctx, patient_id)
 
     def build_extraction_instruction(self, patient_id: str) -> str:
+        # Conditional on rows existing — see the note in
+        # ``genomic_variants.build_extraction_instruction``.
         return (
-            f"Based on the tool results above, populate the PGXResultList "
-            f"for patient '{patient_id}'. For each gene-drug result write "
-            f"a 1-2 sentence clinical interpretation of what the patient's "
+            f"Populate the PGXResultList for patient '{patient_id}' "
+            f"strictly from the tool results above. Include exactly one "
+            f"entry per gene-drug row returned by the tools and no others. "
+            f"If the tool results contain no rows, return an empty "
+            f"'results' list and say so in 'summary' — never supply a "
+            f"gene, diplotype or drug recommendation that does not appear "
+            f"in the tool output. For each row that IS present, write a "
+            f"1-2 sentence clinical interpretation of what the patient's "
             f"phenotype means for this drug and what the recommendation "
             f"implies. Write a 'summary' covering the overall PGX picture "
             f"across all drugs assessed."

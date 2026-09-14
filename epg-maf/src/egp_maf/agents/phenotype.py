@@ -84,13 +84,20 @@ class PhenotypeSpecialist(SpecialistBase[PhenotypeResultList]):
         return build_phenotype_tools(self._repo, ctx, patient_id)
 
     def build_extraction_instruction(self, patient_id: str) -> str:
+        # Conditional on rows existing — see the note in
+        # ``genomic_variants.build_extraction_instruction``.
         return (
-            f"Based on the tool results above, populate the PhenotypeResultList "
-            f"for patient '{patient_id}'. For each disease group: set "
-            f"'relevant_to_query' true only when the disease is directly "
-            f"relevant to the user query; write a 1-2 sentence clinical "
-            f"interpretation only when 'relevant_to_query' is true. Write "
-            f"a 'summary' covering the overall diagnosis picture."
+            f"Populate the PhenotypeResultList for patient '{patient_id}' "
+            f"strictly from the tool results above. Include exactly one "
+            f"entry per disease group returned by the tools and no "
+            f"others. If the tool results contain no rows, return an empty "
+            f"'results' list and say so in 'summary' — never supply a "
+            f"diagnosis that does not appear in the tool output. For each "
+            f"disease group that IS present: set 'relevant_to_query' true "
+            f"only when the disease is directly relevant to the user "
+            f"query; write a 1-2 sentence clinical interpretation only "
+            f"when 'relevant_to_query' is true. Write a 'summary' covering "
+            f"the overall diagnosis picture."
         )
 
     @property

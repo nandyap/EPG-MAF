@@ -73,12 +73,20 @@ class PRSSpecialist(SpecialistBase[PRSResultList]):
         return build_prs_tools(self._repo, ctx, patient_id)
 
     def build_extraction_instruction(self, patient_id: str) -> str:
+        # Conditional on rows existing — see the note in
+        # ``genomic_variants.build_extraction_instruction`` for why the
+        # earlier phrasing was unsafe.
         return (
-            "Based on the tool results above, populate the PRSResultList "
-            "for this patient. For each result write a 1-2 sentence clinical "
-            "interpretation in the 'interpretation' field explaining what "
-            "the risk band and percentile mean. Write a 'summary' covering "
-            "the overall polygenic risk picture across all traits."
+            "Populate the PRSResultList for this patient strictly from "
+            "the tool results above. Include exactly one entry per score "
+            "row returned by the tools and no others. If the tool results "
+            "contain no rows, return an empty 'results' list and say so in "
+            "'summary' — never supply a score that does not appear in the "
+            "tool output. For each row that IS present, write a 1-2 "
+            "sentence clinical interpretation in the 'interpretation' "
+            "field explaining what the risk band and percentile mean. "
+            "Write a 'summary' covering the overall polygenic risk "
+            "picture across all traits."
         )
 
     @property

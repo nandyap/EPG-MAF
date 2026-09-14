@@ -263,25 +263,33 @@ def create_app(container: Container) -> FastAPI:
 
             trace_id, _span_id = get_current_trace_and_span_ids()
 
-            _final_slots = getattr(final, "specialist_slots", None) or {}
+            _final_messages = getattr(final, "messages", None) or []
+            _reply = next(
+                (
+                    m.content
+                    for m in reversed(_final_messages)
+                    if getattr(m, "role", None) == "assistant"
+                ),
+                "",
+            )
+            # Slots are five named fields on ChatWorkflowState, not a dict.
+            # The first version of this line read a non-existent
+            # ``specialist_slots`` attribute through ``getattr(..., {})``
+            # and logged ``slot_statuses={}`` on every turn — a log line
+            # reporting what it had been told rather than what was true,
+            # which is the §8 meta-lesson restated inside the telemetry
+            # added to enforce it.
             trace(
                 "turn.end",
                 outcome="completed",
                 agents_completed=list(getattr(final, "agents_completed", []) or []),
                 slot_statuses={
-                    name: getattr(slot, "status", None)
-                    for name, slot in (
-                        _final_slots.items()
-                        if hasattr(_final_slots, "items")
-                        else []
-                    )
+                    name: getattr(getattr(final, name, None), "status", None)
+                    for name in _SPECIALIST_SLOT_NAMES
                 },
-                reply_chars=len(getattr(final, "final_response", "") or ""),
+                reply_chars=len(_reply),
             )
-            trace_payload(
-                "turn.end.body",
-                reply=preview(getattr(final, "final_response", "") or ""),
-            )
+            trace_payload("turn.end.body", reply=preview(_reply))
 
             # Slice 5 (B-009): persist the user + assistant messages
             # back onto the thread so ``GET /threads/{id}`` returns the

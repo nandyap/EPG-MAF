@@ -70,10 +70,41 @@ _INPUTS = SpecialistInputs(
     patient_id="P1", original_query="what does this show?", requested_diseases=None
 )
 
+#: A patient-scoped call that returned one row.
+#:
+#: ``SpecialistBase.run`` skips the extraction pass entirely when no
+#: patient-scoped tool returned a row, because there is nothing to
+#: extract from — the guard added after the 2026-09-11 HG010 incident,
+#: where the extraction pass invented two BRCA1 variants for a patient
+#: that does not exist.
+#:
+#: Every test below is about what happens to results that *were*
+#: retrieved, so they need retrieval to have happened. The tool name only
+#: has to carry a patient-scoped prefix; the gate does not inspect it
+#: further, and the row content is irrelevant to derived-field logic.
+#:
+#: Tests that specifically exercise the no-data path pass
+#: ``tool_calls=[]`` explicitly.
+_RETRIEVED_ONE_ROW = [
+    ToolCall(
+        tool_name="explore_patient_records",
+        tool_parameters={"patient_id": "P1"},
+        tool_output=[{"patient_id": "P1"}],
+    )
+]
+
 
 def _stub_llm(result: object, *, tool_calls: list[ToolCall] | None = None) -> StubSpecialistLlm:
+    """Stub both specialist LLM passes.
+
+    ``tool_calls=None`` means "the default: something was retrieved". Pass
+    an explicit ``[]`` to simulate a patient with no data.
+    """
     return StubSpecialistLlm(
-        react_result=SpecialistReactResult(transcript=[], tool_calls=tool_calls or []),
+        react_result=SpecialistReactResult(
+            transcript=[],
+            tool_calls=_RETRIEVED_ONE_ROW if tool_calls is None else tool_calls,
+        ),
         extraction_result=result,
     )
 

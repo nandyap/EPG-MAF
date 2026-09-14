@@ -91,16 +91,32 @@ class GenomicVariantsSpecialist(SpecialistBase[GenomicVariantsResultList]):
         return build_genomic_variants_tools(self._repo, ctx, patient_id)
 
     def build_extraction_instruction(self, patient_id: str) -> str:
+        # Wording matters here. The previous version opened "Each tool
+        # result row already contains typed sample_data ... copy them
+        # into each variant result unchanged", which states as fact that
+        # rows exist. On 2026-09-11 the tools returned nothing for a
+        # non-existent patient, the transcript said so plainly, and the
+        # model resolved the contradiction in favour of the instruction —
+        # inventing two fully-specified BRCA1 variants.
+        #
+        # Everything below is now conditional on rows actually being
+        # present. ``SpecialistBase.run`` additionally does not call this
+        # pass at all when no patient-scoped tool returned a row; this
+        # wording is the second layer, not the control.
         return (
-            f"Based on the tool results above, populate a "
-            f"GenomicVariantsResultList for patient '{patient_id}'. Each "
-            f"tool result row already contains typed sample_data, "
-            f"core_annotations and extended_annotations sub-models — copy "
-            f"them into each variant result unchanged. Write a 1-2 sentence "
-            f"clinical interpretation in the 'interpretation' field "
-            f"explaining the variant's pathogenicity and clinical "
-            f"significance. Write a 'summary' field covering the overall "
-            f"variant picture for this patient."
+            f"Populate a GenomicVariantsResultList for patient "
+            f"'{patient_id}' strictly from the tool results above. "
+            f"Include exactly one entry per variant row returned by the "
+            f"tools and no others. If the tool results contain no variant "
+            f"rows, return an empty 'results' list and say so in "
+            f"'summary' — never supply a variant that does not appear in "
+            f"the tool output. For each row that IS present, copy its "
+            f"typed sample_data, core_annotations and extended_annotations "
+            f"sub-models unchanged, then write a 1-2 sentence clinical "
+            f"interpretation in the 'interpretation' field explaining that "
+            f"variant's pathogenicity and clinical significance. Write a "
+            f"'summary' field covering the overall variant picture for "
+            f"this patient."
         )
 
     @property

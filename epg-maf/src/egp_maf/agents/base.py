@@ -62,6 +62,15 @@ _logger = get_logger(__name__)
 
 ResultListT = TypeVar("ResultListT", bound=BaseModel)
 
+#: Tool-name prefixes that read **patient** data.
+#:
+#: ``search_*`` is deliberately absent. Those tools query the reference
+#: annotation tables (``variant_annotations``, ``pgx_annotations``, …),
+#: take no ``patient_id`` and carry no authz check, so they happily
+#: return rows for a patient id that does not exist. Only these prefixes
+#: answer "did we retrieve anything about *this patient*?".
+_PATIENT_SCOPED_TOOL_PREFIXES = ("get_patient_", "explore_patient_")
+
 
 class SpecialistRunError(EgpError):
     """Raised when a specialist run fails unrecoverably. Callers
@@ -290,18 +299,19 @@ class SpecialistBase(ABC, Generic[ResultListT]):
 
             # Step 4: tool trace is already parsed by the LLM impl.
             #
-            # ``total_rows`` is the single most diagnostic number in this
-            # method. Zero here with a non-empty result list at step 5
-            # means the findings were authored rather than retrieved —
-            # there was nothing to derive them from. Patient-scoped tools
-            # are counted separately because ``search_*`` reads the
-            # reference annotation tables and is not patient-filtered, so
-            # it can return rows for a patient that does not exist.
+            # ``patient_scoped_rows`` is the single most important number
+            # in this method. ``search_*`` is excluded deliberately: it
+            # queries the reference annotation tables with no
+            # ``patient_id`` filter, so it returns rows even for a patient
+            # that does not exist. Counting it would defeat the check
+            # below in exactly the case the check exists for.
             patient_scoped = [
                 c
                 for c in react.tool_calls
-                if c.tool_name.startswith(("get_patient_", "explore_patient_"))
+                if c.tool_name.startswith(_PATIENT_SCOPED_TOOL_PREFIXES)
             ]
+            patient_scoped_rows = sum(len(c.tool_output) for c in patient_scoped)
+            errored_calls = [c for c in react.tool_calls if c.error]
             trace(
                 "specialist.step.4.tool_trace",
                 specialist=self.name,
@@ -309,11 +319,89 @@ class SpecialistBase(ABC, Generic[ResultListT]):
                 tool_call_count=len(react.tool_calls),
                 total_rows=sum(len(c.tool_output) for c in react.tool_calls),
                 patient_scoped_calls=[c.tool_name for c in patient_scoped],
-                patient_scoped_rows=sum(len(c.tool_output) for c in patient_scoped),
-                errored_calls=[c.tool_name for c in react.tool_calls if c.error],
+                patient_scoped_rows=patient_scoped_rows,
+                errored_calls=[c.tool_name for c in errored_calls],
             )
 
-            # Step 5: extraction pass.
+            # Step 5: extraction pass — but only when there is something
+            # to extract.
+            #
+            # Observed live 2026-09-11 (patient HG010, which does not
+            # exist): every patient-scoped query returned zero rows, the
+            # ReAct pass correctly reported "there are no recorded
+            # variants in the BRCA1 gene for this patient" — and the
+            # extraction pass then returned two complete BRCA1 variants,
+            # with rsIDs, ClinVar accessions, CADD scores and ACMG
+            # criteria. None of it existed.
+            #
+            # The cause is a contradiction, not mere ambiguity. The
+            # extraction instruction asserts rows exist ("each tool result
+            # row already contains ... copy them unchanged") while the
+            # transcript says none do. Asked to reconcile the two, the
+            # model manufactured the rows the instruction promised.
+            #
+            # The instruction wording is fixed too, but wording alone is
+            # not a control: it leaves correctness contingent on the model
+            # complying on every turn, which is the same bet that failed
+            # in 7ca173e and b6b479a. With no rows there is nothing to
+            # extract, so the call is simply not made. Deterministic, and
+            # one LLM round-trip cheaper.
+            if patient_scoped_rows == 0:
+                extracted = self._no_data_result_list(
+                    inputs.patient_id,
+                    retrieval_failed=bool(errored_calls),
+                )
+                if errored_calls:
+                    errors.extend(
+                        f"{c.tool_name}: {c.error}" for c in errored_calls
+                    )
+                _logger.warning(
+                    "specialist.extraction_skipped_no_data",
+                    specialist=self.name,
+                    patient_id=inputs.patient_id,
+                    patient_scoped_calls=[c.tool_name for c in patient_scoped],
+                    errored_calls=[c.tool_name for c in errored_calls],
+                    retrieval_failed=bool(errored_calls),
+                    reason=(
+                        "patient-scoped tools errored"
+                        if errored_calls
+                        else "patient-scoped tools returned no rows"
+                    ),
+                )
+                # Steps 6 and 7 are skipped rather than run over an empty
+                # list. Provenance would be a no-op, but ``_attribute_model``
+                # would stamp the interpretation model name onto the
+                # deterministic summary written above — attributing a
+                # process-authored sentence to the LLM, which is the same
+                # false-attribution fault fixed in 67d12af.
+                extracted = self.apply_derived_fields(
+                    extracted, inputs.patient_id
+                )
+                slot_output = self.to_slot_output(
+                    extracted,
+                    status="failed" if errored_calls else "completed",
+                    errors=errors,
+                )
+                trace(
+                    "specialist.step.9_10.slot_built",
+                    specialist=self.name,
+                    status="failed" if errored_calls else "completed",
+                    slot_type=type(slot_output).__name__,
+                    extraction_skipped=True,
+                )
+                _logger.info(
+                    "specialist.run.completed",
+                    specialist=self.name,
+                    patient_id=inputs.patient_id,
+                    duration_ms=int(
+                        (datetime.now(timezone.utc) - started_at).total_seconds()
+                        * 1000
+                    ),
+                    tool_call_count=len(react.tool_calls),
+                    extraction_skipped=True,
+                )
+                return slot_output
+
             extracted = await llm.run_extraction(
                 SpecialistExtractionRequest(
                     transcript=react.transcript,
@@ -390,6 +478,65 @@ class SpecialistBase(ABC, Generic[ResultListT]):
             return self.to_slot_output(None, status="failed", errors=errors)
 
     # ── Helpers ─────────────────────────────────────────────────────
+
+    def _no_data_result_list(
+        self,
+        patient_id: str,
+        *,
+        retrieval_failed: bool,
+    ) -> ResultListT:
+        """Empty result list with a **process-authored** summary.
+
+        Used when no patient-scoped tool returned a row, in place of an
+        extraction call that would have nothing to extract from.
+
+        The summary is written here, in Python, and never by a model.
+        That is the point: the sentence a clinician ultimately reads about
+        an absence must not itself be generated by the component that
+        invented data on 2026-09-11.
+
+        The two cases are kept strictly apart because conflating them is
+        a clinical safety error, not a wording preference:
+
+        - **No rows.** The query succeeded and the patient has no records
+          in this domain. "None found" is a true statement about the
+          database.
+        - **Tools errored.** A failure, a timeout, or an authz denial. We
+          know *nothing*. Reporting that as "none found" would turn a
+          retrieval failure into a negative clinical finding — absence of
+          evidence rendered as evidence of absence.
+
+        All five ``<Domain>ResultList`` models default ``results`` to an
+        empty list and declare ``summary``, but they do **not** share
+        ``patient_id`` — ``PRSResultList`` has no such field and is
+        ``extra="forbid"``, so passing it unconditionally raises. Fields
+        are therefore set only where the model declares them; the
+        domain's own ``apply_derived_fields`` populates the rest.
+        """
+        if retrieval_failed:
+            summary = (
+                f"Clinical data for patient {patient_id} could NOT be "
+                f"retrieved from the {self.name} domain: the database "
+                f"query did not complete. This is a retrieval failure, "
+                f"not a finding. No conclusion may be drawn about whether "
+                f"such records exist, and this must be reported as an "
+                f"inability to check rather than as an absence of "
+                f"findings."
+            )
+        else:
+            summary = (
+                f"No {self.name} records exist for patient {patient_id}. "
+                f"The database was queried successfully and returned zero "
+                f"rows, so there are no findings to report in this domain."
+            )
+
+        schema = self.response_schema
+        kwargs: dict[str, Any] = {}
+        if "summary" in schema.model_fields:
+            kwargs["summary"] = summary
+        if "patient_id" in schema.model_fields:
+            kwargs["patient_id"] = patient_id
+        return schema(**kwargs)
 
     def _build_user_message(self, inputs: SpecialistInputs) -> str:
         """The shared user-message shape used by every prototype specialist."""

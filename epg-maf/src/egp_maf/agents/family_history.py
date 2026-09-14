@@ -93,21 +93,27 @@ class FamilyHistorySpecialist(SpecialistBase[FamilyHistoryResultList]):
         return build_family_history_tools(self._repo, ctx, patient_id)
 
     def build_extraction_instruction(self, patient_id: str) -> str:
+        # Conditional on rows existing — see the note in
+        # ``genomic_variants.build_extraction_instruction``.
         return (
-            f"Based on the tool results above, populate the "
-            f"FamilyHistoryResultList for patient '{patient_id}'. For each "
-            f"family history record populate all threshold fields "
-            f"(disease_name, criteria_name, affected_relative_count, "
-            f"total_relatives_searched, meets_threshold, "
-            f"search_context_notes, last_observed_diagnosis_in_database) "
-            f"from the patient data columns; populate criteria_description "
-            f"and criteria_source from the annotation JOIN columns; write "
-            f"a 1-2 sentence clinical interpretation — if "
-            f"search_context_notes indicates an incomplete search, "
-            f"explicitly qualify the result (e.g. 'Threshold not met; "
-            f"however, 0 eligible females over 30 were included — result "
-            f"may underestimate risk'). Write a 'summary' field covering "
-            f"the overall family history picture."
+            f"Populate the FamilyHistoryResultList for patient "
+            f"'{patient_id}' strictly from the tool results above. "
+            f"Include exactly one entry per family history row returned by "
+            f"the tools and no others. If the tool results contain no "
+            f"rows, return an empty 'results' list and say so in 'summary' "
+            f"— never supply a criterion or relative count that does not "
+            f"appear in the tool output. For each row that IS present, "
+            f"populate all threshold fields (disease_name, criteria_name, "
+            f"affected_relative_count, total_relatives_searched, "
+            f"meets_threshold, search_context_notes, "
+            f"last_observed_diagnosis_in_database) from the patient data "
+            f"columns; populate criteria_description and criteria_source "
+            f"from the annotation JOIN columns; write a 1-2 sentence "
+            f"clinical interpretation — if search_context_notes indicates "
+            f"an incomplete search, explicitly qualify the result (e.g. "
+            f"'Threshold not met; however, 0 eligible females over 30 were "
+            f"included — result may underestimate risk'). Write a "
+            f"'summary' field covering the overall family history picture."
         )
 
     @property
